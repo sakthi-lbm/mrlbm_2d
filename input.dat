@@ -1,0 +1,36 @@
+&DomainSize
+	nx = 320
+	ny = 32
+	lattice_type = 9
+/
+&Cylinder
+	ncy = 40
+	L_front = 8
+	L_back = 21
+	L_top = 6
+	L_bot = 6
+/
+&Numbers
+	Re =100
+/
+&Parallel 
+	  nprocsx = 1
+	  nprocsy = 1
+/
+&Controls
+	uo = 0.1
+	iplot = 1000
+	max_iter = 1000000
+	isave = 10000
+	irestart = 1
+	statsbegin = 130001
+	statsend = 200000
+	iplotstats = 1000
+/
+&LogicalControls
+	x_periodic = .false.
+	y_periodic = .true.
+	channel_with_cylinder = .true.
+	channel_with_square = .false.
+	incomp = .false.
+	vel_interp = .true.
