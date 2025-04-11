@@ -1208,6 +1208,109 @@ contains
   
   end subroutine apply_bc_incomp
   
+  subroutine numerical_boundary_cases()
+  	implicit none
+  	
+  	
+  	
+  	do k = 0, q-1
+  		A_i = w(k)*( 1.0d0 + 3.0d0*uxp*e(k, 1) + 3.0d0*uyp*e(k, 2) )
+			E_i = w(k)*( 1.0d0 + 3.0d0*uxp*e(k, 1) + 3.0d0*uyp*e(k, 2) &
+							&  + 4.50d0*(uxp**2)*Hxx(k) + 4.50d0*(uyp**2)*Hyy(k) + 9.0d0*(uxp*uyp)*Hxy(k) )
+  	end do
+  	
+  	
+  	
+  	rhoI_b = 0.0d0; mxxI_b = 0.0d0; myyI_b = 0.0d0; mxyI_b = 0.0d0
+	
+	outsum_xx = 0.0d0; outsum_yy = 0.0d0; outsum_xy = 0.0d0
+	
+	insum1_xx = 0.0d0; 	insum1_yy = 0.0d0; 	insum1_xy = 0.0d0
+	insum2_xx = 0.0d0; 	insum2_yy = 0.0d0; 	insum2_xy = 0.0d0
+	insum3_xx = 0.0d0; 	insum3_yy = 0.0d0; 	insum3_xy = 0.0d0
+	
+	D1_prime = 0.0d0; D2_prime = 0.0d0; D3_prime = 0.0d0 
+  	
+  	do k = 0, q-1
+		if(Os(k)==1) then
+			
+			A_prime = A_prime + A_i
+			E_prime = E_prime + E_i
+			
+			B11_prime = B11_prime + 4.50d0*w(k)*Hxx(k)
+			B22_prime = B22_prime + 4.50d0*w(k)*Hyy(k)
+			B12_prime = B12_prime + 4.50d0*w(k)*Hxy(k)
+			
+			outsum_xx= outsum_xx + w(k)*Hxx(k)
+			outsum_yy= outsum_yy + w(k)*Hyy(k)
+			outsum_xy= outsum_xy + w(k)*Hxy(k)
+		end if
+		
+		if(Is(k)==1) then
+			rhoI_b = rhoI_b + f(xi,yj,k)
+			mxxI_b = mxxI_b + f(xi,yj,k)*Hxx(k)
+			myyI_b = myyI_b + f(xi,yj,k)*Hyy(k)
+			mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
+			
+			insum1_xx= outsum1_xx + w(k)*Hxx(k)*Hxx(k)
+			insum1_yy= outsum1_yy + w(k)*Hyy(k)*Hxx(k)
+			insum1_xy= outsum1_xy + w(k)*Hxy(k)*Hxx(k)
+			
+			insum2_xx= outsum2_xx + w(k)*Hxx(k)*Hyy(k)
+			insum2_yy= outsum2_yy + w(k)*Hyy(k)*Hyy(k)
+			insum2_xy= outsum2_xy + w(k)*Hxy(k)*Hyy(k)
+			
+			insum3_xx= outsum3_xx + w(k)*Hxx(k)*Hxy(k)
+			insum3_yy= outsum3_yy + w(k)*Hyy(k)*Hxy(k)
+			insum3_xy= outsum3_xy + w(k)*Hxy(k)*Hxy(k)
+			
+			
+			
+			
+			D11_prime = D11_prime + A_i*Hxx(k)
+			D22_prime = D22_prime + A_i*Hyy(k)
+			D12_prime = D12_prime + A_i*Hxy(k)
+		end if
+	end do
+	
+	mxxI_b = mxxI_b/rhoI_b
+	myyI_b = myyI_b/rhoI_b
+	mxyI_b = mxyI_b/rhoI_b
+	
+	
+	G_prime = (1.0d0 - omega)*A_prime + omega*E_prime
+	
+	
+	J11_prime = (1.0d0 - omega)*B11_prime
+	J22_prime = (1.0d0 - omega)*B22_prime
+	J12_prime = (1.0d0 - omega)*B12_prime
+	
+	XX_1 = (( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum1_xx))/mxxI_b
+	YY_1 = (( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum1_yy))/mxxI_b
+	XY_1 = 2.0d0*(( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum1_xy))/mxxI_b
+	
+	XX_2 = (( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum2_xx))/myyI_b
+	YY_2 = (( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum2_yy))/myyI_b
+	XY_2 = 2.0d0*(( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum2_xy))/myyI_b
+	
+	XX_3 = (( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum3_xx))/mxyI_b
+	YY_3 = (( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum3_yy))/mxyI_b
+	XY_3 = 2.0d0*(( (1.0d0 - omega) * 4.50d0 * outsum_xx ) - (4.50d0 * insum3_xy))/mxyI_b
+	
+	D1_star = D1_prime/mxxI_b
+	D2_star = D2_prime/myyI_b
+	D3_star = D3_prime/mxyI_b
+	
+	R1 = D1_star - 
+  	
+  	
+  	
+  	
+  
+  
+  
+  end subroutine numerical_boundary_cases
+  
   subroutine boundary_cases(xi,yj,label,uxp,uyp)
 	implicit none
 	integer,intent(in) :: xi,yj,label
