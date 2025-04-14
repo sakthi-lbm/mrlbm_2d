@@ -19,19 +19,23 @@ program lbm_2d
   integer, allocatable,dimension(:) :: bou_i,bou_j,label_bc
   real(8) :: Re,uo,nu,omega, uinlet,vinlet
   real(8), allocatable,dimension(:) :: w,Hxx,Hyy,Hxy,Hxxy,Hxyy,Hxxyy
-  integer, allocatable,dimension(:, :) :: e
+  real(8), allocatable,dimension(:, :, :) :: cx_p, cy_p, Hxx_p,Hyy_p,Hxy_p
+  integer, allocatable,dimension(:, :) :: e, e_p
   real(8), allocatable,dimension(:, :, :) :: f, f_eq, f_tmp,fin,fout
   real(8), allocatable, dimension(:, :) :: rho, p, ux, uy, mxx, myy, mxy,scalar
-  real(8), allocatable, dimension(:) :: ut, un, mxxp, myyp, mxyp
-  real(8) :: x_c,y_c,r_c,distance, sinth,costh,radius
+  real(8), allocatable, dimension(:, :) ::  cth_glb, sth_glb, c2th_glb, s2th_glb
+  real(8), allocatable, dimension(:) :: uxp_b, uyp_b
+  real(8), allocatable, dimension(:,:) :: mxxp, myyp, mxyp
+  real(8) :: x_c,y_c,r_c,distance
   real(8), allocatable,dimension(:, :) :: er,er1
   real(8), allocatable,dimension(:) :: theta_c,p_mean_cy,radii,xb,yb,delta_uk,pb,p_fit
   real(8), allocatable,dimension(:) :: x_ref1,y_ref1,x_ref2,y_ref2,x_ref3,y_ref3,x_ref4,y_ref4
   real(8), allocatable,dimension(:) :: ux_ref1,uy_ref1,ux_ref2,uy_ref2,ux_ref3,uy_ref3,ux_ref4,uy_ref4
   real(8), allocatable,dimension(:) :: p_ref1,p_ref2,p_ref3,p_ref4
+  real(8), allocatable,dimension(:) :: mxxp_ref1,mxxp_ref2,mxxp_ref3,mxxp_ref4
+  real(8), allocatable,dimension(:) :: myyp_ref1,myyp_ref2,myyp_ref3,myyp_ref4
   integer, allocatable,dimension(:,:) :: i_p2,j_p2,i_p3,j_p3,i_p4,j_p4
   integer, allocatable,dimension(:,:) :: Incs_b, Outs_b
-  
   integer :: i, j, k, l, iter, coord_i,coord_j
   real(8) :: cu
   real(8) :: dx, dy, delx
@@ -42,7 +46,8 @@ program lbm_2d
   character (len=7) :: restart_dir_name = 'restart'//char(0)
   character(len=100) :: filename,filename_bin
   character (len=100) :: bc_type
-  logical :: x_periodic, y_periodic, channel_with_cylinder,incomp,channel_with_square,vel_interp
+  logical :: x_periodic, y_periodic, channel_with_cylinder,incomp,channel_with_square
+  logical :: vel_interp, mom_interp, rotated_coordinate
   logical, parameter :: verbose = .true.
   
   	!$ call omp_set_num_threads(num_threads)
@@ -76,15 +81,18 @@ program lbm_2d
 	vinlet  = 0.0d0   	!inlet radial velocity 
 	
 	! Lattice weights and velocity sets
-	w(0:q-1) = (/ 16.0/36.0, 4.0/36.0, 4.0/36.0, 4.0/36.0, 4.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0 /)
-	e(0:q-1, 1) = (/ 0, 1, 0, -1, 0, 1, -1, -1, 1 /)
-	e(0:q-1, 2) = (/ 0, 0, 1, 0, -1, 1, 1, -1, -1 /)
+	w(0:q-1) = (/ 16.0/36.0, 4.0/36.0, 4.0/36.0, 4.0/36.0, 4.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0 /)	!w_k
+	e(0:q-1, 1) = (/ 0, 1, 0, -1, 0, 1, -1, -1, 1 /)		!cx
+	e(0:q-1, 2) = (/ 0, 0, 1, 0, -1, 1, 1, -1, -1 /)		!cy
 	
 	
-	nu    = uinlet *(2.0d0*max_radii)/Re;     				!kinematic viscosity 
+	nu    = uinlet * (ny-1)/Re
+	if (channel_with_cylinder) nu    = uinlet *(2.0d0*max_radii)/Re;     				!kinematic viscosity 
 	omega = 1.0d0/((3.0*nu)+(1.0d0/2.0d0)) 	!relaxation parameter
 	
-	L_lat = 2.0d0*max_radii
+	L_lat = ny-1
+	if (channel_with_cylinder) L_lat = 2.0d0*max_radii
+	
 	nu_lat = nu
 	u_lat = uo
 	delx_lat = 1.0d0
@@ -119,6 +127,20 @@ program lbm_2d
 		Hxxy(k) = (e(k, 1)*e(k, 1) - (1.0d0/3.0d0))*e(k, 2)									!Hxxy
 		Hxyy(k) = (e(k, 2)*e(k, 2) - (1.0d0/3.0d0))*e(k, 1)									!Hxxy
 		Hxxyy(k) = (e(k, 1)*e(k, 1) - (1.0d0/3.0d0))*(e(k, 2)*e(k, 2) - (1.0d0/3.0d0))		!Hxxy
+	end do
+	
+	! Lattice Velocities and Second-order Hermite polynomial in rotated coordinates
+	do i = 1, nx
+		do j = 1, ny
+			do k = 0, q-1
+				cx_p(i, j, k) = e(k, 1) * cth_glb(i,j) + e(k, 2) * sth_glb(i,j) 	!cx'
+				cy_p(i, j, k) = -e(k, 1) * sth_glb(i,j) + e(k, 2) * cth_glb(i,j) 	!cy'
+				
+				Hxx_p(i, j, k) = Hxx(k) * (cth_glb(i,j)**2) + Hyy(k) *(sth_glb(i,j)**2) + Hxy(k) * s2th_glb(i,j)	!Hxx'
+				Hyy_p(i, j, k) = Hxx(k) * (sth_glb(i,j)**2) + Hyy(k) *(cth_glb(i,j)**2) - Hxy(k) * s2th_glb(i,j)	!Hyy'
+				Hxy_p(i, j, k) = (Hyy(k) - Hxx(k)) * 0.50d0 * s2th_glb(i,j) + Hxy(k) * c2th_glb(i,j)				!Hxy'
+			end do
+		end do
 	end do
 
 	 if (irestart == 0) then
@@ -186,7 +208,7 @@ program lbm_2d
 	!-----------------------------------------------EDGES-----------------------------------------------------------------------
 	!CYLINDER wall (No-Slip):---------------------------------------------------------------------------------------------------
 	
-	if(channel_with_cylinder) then
+	if(channel_with_cylinder .and. (.not. rotated_coordinate)) then
 		!velocity interpolation for curved boundary: 
 		if(vel_interp) call velocity_interpolation_boundary_nodes()
 		
@@ -197,6 +219,23 @@ program lbm_2d
 			!Original coordinate system:
 !			call boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
 			call numerical_boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
+
+		end do
+	end if
+	
+	if(channel_with_cylinder .and. rotated_coordinate) then
+		!velocity interpolation for curved boundary: 
+		if(vel_interp) call velocity_interpolation_boundary_nodes()
+		if(mom_interp) call moments_interpolation_boundary_nodes()
+		
+		do l = 1,nbct
+			i = bou_i(l)
+			j = bou_j(l)
+			
+			!!Rotated coordinate system
+			uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
+			uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
+			call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
 
 		end do
 	end if
@@ -397,6 +436,7 @@ contains
 		p(:,:) = rho(:,:)/3.0d0
 		
 		mean_counter = real(step - statsbegin)
+		
 		do k = 1,nbct
 			i = bou_i(k)
 			j = bou_j(k)
@@ -473,8 +513,8 @@ contains
 				do k = 1, nbct
 					if(thetavar(k) .le. PI) then
 						write(101,*) abs((thetavar(k)*180.0d0/PI)-180.0d0), pvar(k), p_fit(k), &
-								& 2.0d0*(pvar(k) - (1.196512d0/3.0d0))/(1.1965120d0*0.10d0*0.10d0), &
-								& 2.0d0*(p_fit(k) - (1.196512d0/3.0d0))/(1.1965120d0*0.10d0*0.10d0)
+								& 2.0d0*(pvar(k) - (rho(1,ny/2)/3.0d0))/(rho(1,ny/2)*0.10d0*0.10d0), &
+								& 2.0d0*(p_fit(k) - (rho(1,ny/2)/3.0d0))/(rho(1,ny/2)*0.10d0*0.10d0)
 					end if
 				end do
 			close(101)
@@ -580,6 +620,115 @@ contains
 		end do
 		
 	end subroutine velocity_interpolation_boundary_nodes
+	
+	subroutine moments_interpolation_boundary_nodes()
+		implicit none
+		real(8) :: term1,term2,term3
+		real(8) :: xd,yd,mxx_0,myy_0,mxx_1,myy_1
+		real(8) :: mxxp1,mxxp2,mxxp3,mxxp4
+		real(8) :: myyp1,myyp2,myyp3,myyp4
+		integer :: i,j,k
+	
+		do k = 1,nbct
+			i = bou_i(k)
+			j = bou_j(k)
+			
+			!First reference node: cylinder point
+			mxxp_ref1(k) = 0.0d0
+			myyp_ref1(k) = 0.0d0
+				
+			!Second reference node: First fluid point
+			xd = (x_ref2(k) - x(i_p2(1,k),j_p2(1,k)))/dx
+			yd = (y_ref2(k) - y(i_p2(1,k),j_p2(1,k)))/dy
+			
+			!Calculation for Mxxp at the fluid nodes for quadratic interpolations
+			mxxp1 = mxx(i_p2(1,k),j_p2(1,k))*(cth_glb(i_p2(1,k),j_p2(1,k))**2) &
+				& + myy(i_p2(1,k),j_p2(1,k))*(sth_glb(i_p2(1,k),j_p2(1,k))**2) &
+				& + mxy(i_p2(1,k),j_p2(1,k))*s2th_glb(i_p2(1,k),j_p2(1,k))
+			mxxp2 = mxx(i_p2(2,k),j_p2(2,k))*(cth_glb(i_p2(2,k),j_p2(2,k))**2) &
+				& + myy(i_p2(2,k),j_p2(2,k))*(sth_glb(i_p2(2,k),j_p2(2,k))**2) &
+				& + mxy(i_p2(2,k),j_p2(2,k))*s2th_glb(i_p2(2,k),j_p2(2,k))
+			mxxp3 = mxx(i_p2(3,k),j_p2(3,k))*(cth_glb(i_p2(3,k),j_p2(3,k))**2) &
+				& + myy(i_p2(3,k),j_p2(3,k))*(sth_glb(i_p2(3,k),j_p2(3,k))**2) &
+				& + mxy(i_p2(3,k),j_p2(3,k))*s2th_glb(i_p2(3,k),j_p2(3,k))
+			mxxp4 = mxx(i_p2(4,k),j_p2(4,k))*(cth_glb(i_p2(4,k),j_p2(4,k))**2) &
+				& + myy(i_p2(4,k),j_p2(4,k))*(sth_glb(i_p2(4,k),j_p2(4,k))**2) &
+				& + mxy(i_p2(4,k),j_p2(4,k))*s2th_glb(i_p2(4,k),j_p2(4,k))
+				
+			!Calculation for Myyp at the fluid nodes for quadratic interpolations						
+			myyp1 = mxx(i_p2(1,k),j_p2(1,k))*(sth_glb(i_p2(1,k),j_p2(1,k))**2) &
+				& + myy(i_p2(1,k),j_p2(1,k))*(cth_glb(i_p2(1,k),j_p2(1,k))**2) &
+				& - mxy(i_p2(1,k),j_p2(1,k))*s2th_glb(i_p2(1,k),j_p2(1,k))
+			myyp2 = mxx(i_p2(2,k),j_p2(2,k))*(sth_glb(i_p2(2,k),j_p2(2,k))**2) &
+				& + myy(i_p2(2,k),j_p2(2,k))*(cth_glb(i_p2(2,k),j_p2(2,k))**2) &
+				& - mxy(i_p2(2,k),j_p2(2,k))*s2th_glb(i_p2(2,k),j_p2(2,k))
+			myyp3 = mxx(i_p2(3,k),j_p2(3,k))*(sth_glb(i_p2(3,k),j_p2(3,k))**2) &
+				& + myy(i_p2(3,k),j_p2(3,k))*(cth_glb(i_p2(3,k),j_p2(3,k))**2) &
+				& - mxy(i_p2(3,k),j_p2(3,k))*s2th_glb(i_p2(3,k),j_p2(3,k))
+			myyp4 = mxx(i_p2(4,k),j_p2(4,k))*(sth_glb(i_p2(4,k),j_p2(4,k))**2) &
+				& + myy(i_p2(4,k),j_p2(4,k))*(cth_glb(i_p2(4,k),j_p2(4,k))**2) &
+				& - mxy(i_p2(4,k),j_p2(4,k))*s2th_glb(i_p2(4,k),j_p2(4,k))
+			
+			mxx_0 = (1.0d0 - xd)*mxxp1 + xd*mxxp2
+			myy_0 = (1.0d0 - xd)*myyp1 + xd*myyp2
+			
+			mxx_1 = (1.0d0 - xd)*mxxp3 + xd*mxxp4
+			myy_1 = (1.0d0 - xd)*myyp3 + xd*myyp4
+			
+			mxxp_ref2(k) =  (1.0d0 - yd)*mxx_0 + yd*mxx_1
+			myyp_ref2(k) =  (1.0d0 - yd)*myy_0 + yd*myy_1
+			
+			!Third reference node: Second fluid point
+			xd = (x_ref3(k) - x(i_p3(1,k),j_p3(1,k)))/dx
+			yd = (y_ref3(k) - y(i_p3(1,k),j_p3(1,k)))/dy
+			
+			!Calculation for Mxxp at the fluid nodes for quadratic interpolations
+			mxxp1 = mxx(i_p3(1,k),j_p3(1,k))*(cth_glb(i_p3(1,k),j_p3(1,k))**2) &
+				& + myy(i_p3(1,k),j_p3(1,k))*(sth_glb(i_p3(1,k),j_p3(1,k))**2) &
+				& + mxy(i_p3(1,k),j_p3(1,k))*s2th_glb(i_p3(1,k),j_p3(1,k))
+			mxxp2 = mxx(i_p3(2,k),j_p3(2,k))*(cth_glb(i_p3(2,k),j_p3(2,k))**2) &
+				& + myy(i_p3(2,k),j_p3(2,k))*(sth_glb(i_p3(2,k),j_p3(2,k))**2) &
+				& + mxy(i_p3(2,k),j_p3(2,k))*s2th_glb(i_p3(2,k),j_p3(2,k))
+			mxxp3 = mxx(i_p3(3,k),j_p3(3,k))*(cth_glb(i_p3(3,k),j_p3(3,k))**2) &
+				& + myy(i_p3(3,k),j_p3(3,k))*(sth_glb(i_p3(3,k),j_p3(3,k))**2) &
+				& + mxy(i_p3(3,k),j_p3(3,k))*s2th_glb(i_p3(3,k),j_p3(3,k))
+			mxxp4 = mxx(i_p3(4,k),j_p3(4,k))*(cth_glb(i_p3(4,k),j_p3(4,k))**2) &
+				& + myy(i_p3(4,k),j_p3(4,k))*(sth_glb(i_p3(4,k),j_p3(4,k))**2) &
+				& + mxy(i_p3(4,k),j_p3(4,k))*s2th_glb(i_p3(4,k),j_p3(4,k))
+			!Calculation for Myyp at the fluid nodes for quadratic interpolations						
+			myyp1 = mxx(i_p3(1,k),j_p3(1,k))*(sth_glb(i_p3(1,k),j_p3(1,k))**2) &
+				& + myy(i_p3(1,k),j_p3(1,k))*(cth_glb(i_p3(1,k),j_p3(1,k))**2) &
+				& - mxy(i_p3(1,k),j_p3(1,k))*s2th_glb(i_p3(1,k),j_p3(1,k))
+			myyp2 = mxx(i_p3(2,k),j_p3(2,k))*(sth_glb(i_p3(2,k),j_p3(2,k))**2) &
+				& + myy(i_p3(2,k),j_p3(2,k))*(cth_glb(i_p3(2,k),j_p3(2,k))**2) &
+				& - mxy(i_p3(2,k),j_p3(2,k))*s2th_glb(i_p3(2,k),j_p3(2,k))
+			myyp3 = mxx(i_p3(3,k),j_p3(3,k))*(sth_glb(i_p3(3,k),j_p3(3,k))**2) &
+				& + myy(i_p3(3,k),j_p3(3,k))*(cth_glb(i_p3(3,k),j_p3(3,k))**2) &
+				& - mxy(i_p3(3,k),j_p3(3,k))*s2th_glb(i_p3(3,k),j_p3(3,k))
+			myyp4 = mxx(i_p3(4,k),j_p3(4,k))*(sth_glb(i_p3(4,k),j_p3(4,k))**2) &
+				& + myy(i_p3(4,k),j_p3(4,k))*(cth_glb(i_p3(4,k),j_p3(4,k))**2) &
+				& - mxy(i_p3(4,k),j_p3(4,k))*s2th_glb(i_p3(4,k),j_p3(4,k))
+			
+			mxx_0 = (1.0d0 - xd)*mxxp1 + xd*mxxp2
+			myy_0 = (1.0d0 - xd)*myyp1 + xd*myyp2
+			
+			mxx_1 = (1.0d0 - xd)*mxxp3 + xd*mxxp4
+			myy_1 = (1.0d0 - xd)*myyp3 + xd*myyp4
+			
+			mxxp_ref3(k) =  (1.0d0 - yd)*mxx_0 + yd*mxx_1
+			myyp_ref3(k) =  (1.0d0 - yd)*myy_0 + yd*myy_1
+			
+			!Variable interpolation:
+			term1 = (2.0d0*delx*delx - (delta_uk(k)**2) + 3.0d0* delta_uk(k)*delx)/(2.0d0*(delx**2))
+			term2 =  delta_uk(k)*( delta_uk(k) - 2.0d0*delx)/(delx**2)
+			term3 =  delta_uk(k)*( delta_uk(k) - delx)/(2.0d0*(delx**2))
+			!Boundary node moments:
+			mxxp(i,j) = term1*mxxp_ref1(k) + term2*mxxp_ref2(k) - term3*mxxp_ref3(k)
+			myyp(i,j) = term1*myyp_ref1(k) + term2*myyp_ref2(k) - term3*myyp_ref3(k) 
+			
+		end do
+		
+	end subroutine moments_interpolation_boundary_nodes
 		
 
   subroutine get_coord()
@@ -588,7 +737,7 @@ contains
 	integer :: flag0,flag1,flag2,flag3
 	real, parameter :: epsilon = 0.5          ! Tolerance for boundary
     integer :: i, j, k,l, cnt, i1,j1,i2,j2,i3,j3,i_temp,j_temp,ss,ee
-    real(8) :: thet,x_s,y_s,thet1,thet2,thet_mid,lambda
+    real(8) :: thet,x_s,y_s,thet1,thet2,thet_mid,lambda,radi
     real(8) :: xmid,ymid,epsi,delta_x,delta_y,rr,unit_nx,unit_ny
 
 	epsi = 0.2
@@ -607,6 +756,16 @@ contains
 	end do
 	do j = 1,ny
 		y(:,j) = real(j)
+	end do
+	
+	do i = 1, nx
+		do j = 1, ny
+			radi = sqrt( ((x(i,j) - x_c)**2) + ((y(i,j) - y_c)**2))
+			cth_glb(i,j) = (x(i,j) - x_c)/radi
+			sth_glb(i,j) = (y(i,j) - y_c)/radi
+			s2th_glb(i,j) = 2.0d0*sth_glb(i,j)*cth_glb(i,j)
+			c2th_glb(i,j) = (cth_glb(i,j)**2) - (sth_glb(i,j)**2)
+		end do
 	end do
 	
 	!Identifying the boundary points and solid points
@@ -1346,6 +1505,152 @@ contains
   
   end subroutine numerical_boundary_cases
   
+  subroutine numerical_boundary_cases_rotation(xi,yj,label,uxp,uyp)
+  	implicit none
+  	integer,intent(in) :: xi,yj,label
+  	real(8),intent(in) :: uxp,uyp
+	integer,dimension(0:q-1) :: Is,Os
+	real(8),dimension(0:q-1) :: A_i,E_i, B11_i, B22_i, B12_i
+  	real(8),dimension(1:3,1:3) :: A_coeff
+  	real(8),dimension(1:3) :: b_coeff
+	real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
+	real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
+	real(8) :: A_prime, E_prime, G_prime, B11_prime, B22_prime, B12_prime
+	real(8) :: D_xx_prime, D_yy_prime, D_xy_prime, J11_prime, J22_prime, J12_prime
+	real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
+	real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
+	real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star, J11_xy_star, J22_xy_star, J12_xy_star
+	real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
+	real(8) :: R_xx, R_yy, R_xy, denominator
+	integer :: nvar_sys = 3
+	
+	
+	Is(0:q-1) = Incs_b(label,0:q-1)
+	Os(0:q-1) = Outs_b(label,0:q-1)
+	
+  	do k = 0, q-1
+  		A_i(k) = w(k)*( 1.0d0 + 3.0d0*uxp*cx_p(xi, yj, k) + 3.0d0*uyp*cy_p(xi, yj, k) )
+		E_i(k) = w(k)*( 1.0d0 + 3.0d0*uxp*cx_p(xi, yj, k) + 3.0d0*uyp*cy_p(xi, yj, k) &
+							& + 4.50d0*(uxp**2)*Hxx_p(xi, yj, k) + 4.50d0*(uyp**2)*Hyy_p(xi, yj, k) + 9.0d0*(uxp*uyp)*Hxy_p(xi, yj, k) )
+		B11_i(k) = 4.50d0*w(k)*Hxx_p(xi, yj, k)
+		B22_i(k) = 4.50d0*w(k)*Hyy_p(xi, yj, k)
+		B12_i(k) = 4.50d0*w(k)*Hxy_p(xi, yj, k)
+  	end do
+  	
+  	!gamma,delta = 1,2,3
+  	!alpha,beta = x,y,z
+  	
+  	rhoI_b = 0.0d0; mxxI_b = 0.0d0; myyI_b = 0.0d0; mxyI_b = 0.0d0
+  	A_prime = 0.0d0; E_prime = 0.0d0
+	
+	B11_prime = 0.0d0; B22_prime = 0.0d0; B12_prime = 0.0d0
+	D_xx_prime = 0.0d0; D_yy_prime = 0.0d0; D_xy_prime = 0.0d0 
+	F11_xx_prime = 0.0d0; F12_xx_prime = 0.0d0; F22_xx_prime = 0.0d0
+	F11_yy_prime = 0.0d0; F12_yy_prime = 0.0d0; F22_yy_prime = 0.0d0
+	F11_xy_prime = 0.0d0; F12_xy_prime = 0.0d0; F22_xy_prime = 0.0d0
+  	
+  	do k = 0, q-1
+		if(Os(k)==1) then
+			A_prime = A_prime + A_i(k)
+			E_prime = E_prime + E_i(k)
+			
+			B11_prime = B11_prime + B11_i(k)
+			B22_prime = B22_prime + B22_i(k)
+			B12_prime = B12_prime + B12_i(k)
+
+		end if
+		
+		if(Is(k)==1) then
+			rhoI_b = rhoI_b + f(xi, yj, k)
+			mxxI_b = mxxI_b + f(xi, yj, k)*Hxx_p(xi, yj, k)
+			myyI_b = myyI_b + f(xi, yj, k)*Hyy_p(xi, yj, k)
+			mxyI_b = mxyI_b + f(xi, yj, k)*Hxy_p(xi, yj, k)
+			
+			D_xx_prime = D_xx_prime + A_i(k)*Hxx_p(xi, yj, k)
+			D_yy_prime = D_yy_prime + A_i(k)*Hyy_p(xi, yj, k)
+			D_xy_prime = D_xy_prime + A_i(k)*Hxy_p(xi, yj, k)
+			
+			F11_xx_prime = F11_xx_prime + B11_i(k)*Hxx_p(xi, yj, k)
+			F22_xx_prime = F22_xx_prime + B22_i(k)*Hxx_p(xi, yj, k)
+			F12_xx_prime = F12_xx_prime + B12_i(k)*Hxx_p(xi, yj, k)
+			
+			F11_yy_prime = F11_yy_prime + B11_i(k)*Hyy_p(xi, yj, k)
+			F22_yy_prime = F22_yy_prime + B22_i(k)*Hyy_p(xi, yj, k)
+			F12_yy_prime = F12_yy_prime + B12_i(k)*Hyy_p(xi, yj, k)
+			
+			F11_xy_prime = F11_xy_prime + B11_i(k)*Hxy_p(xi, yj, k)
+			F22_xy_prime = F22_xy_prime + B22_i(k)*Hxy_p(xi, yj, k)
+			F12_xy_prime = F12_xy_prime + B12_i(k)*Hxy_p(xi, yj, k)
+			
+		end if
+	end do
+	
+	mxxI_b = mxxI_b/rhoI_b
+	myyI_b = myyI_b/rhoI_b
+	mxyI_b = mxyI_b/rhoI_b
+	
+	
+	
+	G_prime = (1.0d0 - omega)*A_prime + omega*E_prime
+	
+	J11_prime = (1.0d0 - omega)*B11_prime
+	J22_prime = (1.0d0 - omega)*B22_prime
+	J12_prime = (1.0d0 - omega)*B12_prime
+
+	J11_xx_star = 	J11_prime * mxxI_b
+	J22_xx_star = 	J22_prime * mxxI_b
+	J12_xx_star = 	J12_prime * mxxI_b
+	
+	J11_yy_star = 	J11_prime * myyI_b
+	J22_yy_star = 	J22_prime * myyI_b
+	J12_yy_star = 	J12_prime * myyI_b
+	
+	J11_xy_star = 	J11_prime * mxyI_b
+	J22_xy_star = 	J22_prime * mxyI_b
+	J12_xy_star = 	J12_prime * mxyI_b
+	
+	L_11_xx = J11_xx_star - F11_xx_prime
+	L_11_yy = J11_yy_star - F11_yy_prime
+	L_11_xy = J11_xy_star - F11_xy_prime
+	
+	L_22_xx = J22_xx_star - F22_xx_prime
+	L_22_yy = J22_yy_star - F22_yy_prime
+	L_22_xy = J22_xy_star - F22_xy_prime
+	
+	L_12_xx = 2.0d0 * (J12_xx_star - F12_xx_prime)
+	L_12_yy = 2.0d0 * (J12_yy_star - F12_yy_prime)
+	L_12_xy = 2.0d0 * (J12_xy_star - F12_xy_prime)
+	
+	
+	 
+	R_xx = D_xx_prime -  G_prime * mxxI_b
+	R_yy = D_yy_prime -  G_prime * myyI_b
+	R_xy = D_xy_prime -  G_prime * mxyI_b
+	
+	
+	
+	
+	Mxx_prime_b = mxxp(xi, yj)
+	Myy_prime_b = myyp(xi, yj)	
+  	Mxy_prime_b =  (R_xy - Mxx_prime_b * L_11_xy - Myy_prime_b * L_22_xy) / L_12_xy
+  	
+  	
+  	
+  	denominator = (1.0d0 - omega)*A_prime + (1.0d0 - omega)*(Mxx_prime_b*B11_prime + Myy_prime_b*B22_prime &
+  					& + 2.0d0*Mxy_prime_b*B12_prime) + omega*E_prime
+  	rho_prime_b = rhoI_b/denominator
+  	
+  		do k = 0, q-1
+			f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*uxp*cx_p(xi, yj, k)) &
+								& + (3.0d0*uyp*cy_p(xi, yj, k))  &
+								& + (9.0d0*Mxx_prime_b*Hxx_p(xi, yj, k)/2.0d0) &
+								& + (9.0d0*Myy_prime_b*Hyy_p(xi, yj, k)/2.0d0) &
+								& + (9.0d0*Mxy_prime_b*Hxy_p(xi, yj, k)) )						
+		end do 
+  	  
+  
+  end subroutine numerical_boundary_cases_rotation
+  
   subroutine solve_system(nvar, A_sys,b_sys,x_11,x_22,x_12)
   	implicit none
   	integer,intent(in) :: nvar
@@ -2018,19 +2323,30 @@ subroutine write_function_plot3d(filename)
     integer :: i, j, l, m 
     integer :: nblocks,nprocs
 	character(len=100), intent(in) :: filename
+	real(8),dimension(1:nx, 1:ny) ::  var_mxxp, var_myyp, var_mxyp
 
   
 	nprocs = 1
     nblocks = nprocs
-
+	do i = 1, nx
+		do j = 1, ny 
+			var_mxxp(i, j) =  sum(fout(i, j, :) * Hxx_p(i, j, :)) / rho(i, j)
+			var_myyp(i, j) =  sum(fout(i, j, :) * Hyy_p(i, j, :)) / rho(i, j)
+			var_mxyp(i, j) =  sum(fout(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
+		end do
+    end do
+    
     open(unit = 200, form = 'unformatted', file=output_dir_name//'/'//trim(filename))
     write(200) nblocks
-    write(200) (nx, ny, 3, l = 0, nprocs-1)
+    write(200) (nx, ny, 6, l = 0, nprocs-1)
     do m = 0, nprocs-1
        write(200) &
             & (( sngl(rho(i, j)), i = 1, nx), j = 1, ny), &
             & (( sngl(ux(i, j)), i = 1, nx), j = 1, ny), &
-            & (( sngl(uy(i, j)), i = 1, nx), j = 1, ny)
+            & (( sngl(uy(i, j)), i = 1, nx), j = 1, ny), &
+            & (( sngl(var_mxxp(i, j)), i = 1, nx), j = 1, ny), &
+            & (( sngl(var_myyp(i, j)), i = 1, nx), j = 1, ny), &
+            & (( sngl(var_mxyp(i, j)), i = 1, nx), j = 1, ny)
     end do
 
     close(200)
@@ -2084,7 +2400,8 @@ subroutine write_function_plot3d(filename)
     namelist/Numbers/Re
     namelist/Parallel/nprocsx,nprocsy
     namelist/Controls/uo,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats
-    namelist/LogicalControls/x_periodic,y_periodic,channel_with_cylinder,channel_with_square,incomp,vel_interp
+    namelist/LogicalControls/x_periodic,y_periodic,channel_with_cylinder,channel_with_square,incomp,vel_interp, &
+    		& mom_interp, rotated_coordinate
 
 300 format("Error while reading input.dat file...")
 150 if (iread_error .ne. 0) then 
@@ -2140,9 +2457,14 @@ subroutine write_function_plot3d(filename)
   	allocate(fin(1:nx, 1:ny, 0:q-1),fout(1:nx, 1:ny, 0:q-1))
   	allocate(rho(1:nx, 1:ny),p(1:nx, 1:ny), ux(1:nx, 1:ny), uy(1:nx, 1:ny))
   	allocate(mxx(1:nx, 1:ny), myy(1:nx, 1:ny), mxy(1:nx, 1:ny))
+  	allocate(mxxp(1:nx, 1:ny), myyp(1:nx, 1:ny), mxyp(1:nx, 1:ny))
   	allocate(er(1:nx, 1:ny),er1(1:nx, 1:ny))
   	allocate(scalar(1:nx, 1:ny))
   	allocate(Incs_b(0:15, 0:q-1),Outs_b(0:15, 0:q-1))
+  	allocate(cth_glb(1:nx, 1:ny),sth_glb(1:nx, 1:ny))
+  	allocate(c2th_glb(1:nx, 1:ny),s2th_glb(1:nx, 1:ny))
+  	allocate(cx_p(1:nx, 1:ny, 0:q-1), cy_p(1:nx, 1:ny, 0:q-1))
+  	allocate(Hxx_p(1:nx, 1:ny, 0:q-1), Hyy_p(1:nx, 1:ny, 0:q-1), Hxy_p(1:nx, 1:ny, 0:q-1))
   
   end subroutine allocate_memory
   
@@ -2153,7 +2475,7 @@ subroutine write_function_plot3d(filename)
   	allocate(bou_i(1:nbct),bou_j(1:nbct))
 	allocate(label_bc(1:nbct),theta_c(1:nbct))
 	allocate(p_mean_cy(1:nbct))
-	allocate(ut(1:nbct),un(1:nbct))
+	allocate(uxp_b(1:nbct),uyp_b(1:nbct))
 	allocate(radii(1:nbct))
 	allocate(xb(1:nbct),yb(1:nbct))
 	allocate(delta_uk(1:nbct),pb(1:nbct),p_fit(1:nbct))
@@ -2164,10 +2486,10 @@ subroutine write_function_plot3d(filename)
 	allocate(i_p2(1:4,1:nbct),j_p2(1:4,1:nbct))
 	allocate(i_p3(1:4,1:nbct),j_p3(1:4,1:nbct))
 	allocate(i_p4(1:4,1:nbct),j_p4(1:4,1:nbct))
-	allocate(p_ref1(1:nbct),ux_ref1(1:nbct),uy_ref1(1:nbct))
-	allocate(p_ref2(1:nbct),ux_ref2(1:nbct),uy_ref2(1:nbct))
-	allocate(p_ref3(1:nbct),ux_ref3(1:nbct),uy_ref3(1:nbct))
-	allocate(p_ref4(1:nbct),ux_ref4(1:nbct),uy_ref4(1:nbct))
+	allocate(p_ref1(1:nbct),ux_ref1(1:nbct),uy_ref1(1:nbct),mxxp_ref1(1:nbct),myyp_ref1(1:nbct))
+	allocate(p_ref2(1:nbct),ux_ref2(1:nbct),uy_ref2(1:nbct),mxxp_ref2(1:nbct),myyp_ref2(1:nbct))
+	allocate(p_ref3(1:nbct),ux_ref3(1:nbct),uy_ref3(1:nbct),mxxp_ref3(1:nbct),myyp_ref3(1:nbct))
+	allocate(p_ref4(1:nbct),ux_ref4(1:nbct),uy_ref4(1:nbct),mxxp_ref4(1:nbct),myyp_ref4(1:nbct))
 
   end subroutine allocate_cylinder_memory
   
