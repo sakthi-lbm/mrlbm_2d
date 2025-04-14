@@ -196,7 +196,6 @@ program lbm_2d
 			
 			!Original coordinate system:
 !			call boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
-			
 			call numerical_boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
 
 		end do
@@ -241,16 +240,8 @@ program lbm_2d
 			if (.not. incomp) call apply_bc(coord_i,coord_j,bc_type)
 		end do
 	end if
-	
-		
 
 	!=============================================================================================================================
-	
-	! do i = 1, nx
-      ! do j = 1, ny
-        ! rho(i, j) = sum(f(i, j, :))
-      ! end do
-    ! end do
 	
     ! Collision step
 	!----------------------------------------------------------------------------------------------------
