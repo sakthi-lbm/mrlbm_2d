@@ -195,7 +195,7 @@ program lbm_2d
 			j = bou_j(l)
 			
 			!Original coordinate system:
-			!call boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
+!			call boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
 			
 			call numerical_boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
 
@@ -1228,16 +1228,14 @@ contains
 	real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
 	real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
 	real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star, J11_xy_star, J22_xy_star, J12_xy_star
-	real(8) :: F11_xx_star, F22_xx_star, F12_xx_star, F11_yy_star, F22_yy_star, F12_yy_star, F11_xy_star, F22_xy_star, F12_xy_star
-	real(8) :: D_xx_star, D_yy_star, D_xy_star, L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
+	real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
 	real(8) :: R_xx, R_yy, R_xy, denominator
 	integer :: nvar_sys = 3
 	
 	
 	Is(0:q-1) = Incs_b(label,0:q-1)
 	Os(0:q-1) = Outs_b(label,0:q-1)
-  	
-  	
+	
   	do k = 0, q-1
   		A_i(k) = w(k)*( 1.0d0 + 3.0d0*uxp*e(k, 1) + 3.0d0*uyp*e(k, 2) )
 		E_i(k) = w(k)*( 1.0d0 + 3.0d0*uxp*e(k, 1) + 3.0d0*uyp*e(k, 2) &
@@ -1246,7 +1244,6 @@ contains
 		B22_i(k) = 4.50d0*w(k)*Hyy(k)
 		B12_i(k) = 4.50d0*w(k)*Hxy(k)
   	end do
-  	
   	
   	!gamma,delta = 1,2,3
   	!alpha,beta = x,y,z
@@ -1305,51 +1302,34 @@ contains
 	J11_prime = (1.0d0 - omega)*B11_prime
 	J22_prime = (1.0d0 - omega)*B22_prime
 	J12_prime = (1.0d0 - omega)*B12_prime
+
+	J11_xx_star = 	J11_prime * mxxI_b
+	J22_xx_star = 	J22_prime * mxxI_b
+	J12_xx_star = 	J12_prime * mxxI_b
 	
-	J11_xx_star = 	J11_prime/mxxI_b
-	J22_xx_star = 	J22_prime/mxxI_b
-	J12_xx_star = 	J12_prime/mxxI_b
+	J11_yy_star = 	J11_prime * myyI_b
+	J22_yy_star = 	J22_prime * myyI_b
+	J12_yy_star = 	J12_prime * myyI_b
 	
-	J11_yy_star = 	J11_prime/myyI_b
-	J22_yy_star = 	J22_prime/myyI_b
-	J12_yy_star = 	J12_prime/myyI_b
+	J11_xy_star = 	J11_prime * mxyI_b
+	J22_xy_star = 	J22_prime * mxyI_b
+	J12_xy_star = 	J12_prime * mxyI_b
 	
-	J11_xy_star = 	J11_prime/mxyI_b
-	J22_xy_star = 	J22_prime/mxyI_b
-	J12_xy_star = 	J12_prime/mxyI_b
+	L_11_xx = J11_xx_star - F11_xx_prime
+	L_11_yy = J11_yy_star - F11_yy_prime
+	L_11_xy = J11_xy_star - F11_xy_prime
 	
-	F11_xx_star = F11_xx_prime/mxxI_b
-	F22_xx_star = F22_xx_prime/mxxI_b
-	F12_xx_star = F12_xx_prime/mxxI_b
+	L_22_xx = J22_xx_star - F22_xx_prime
+	L_22_yy = J22_yy_star - F22_yy_prime
+	L_22_xy = J22_xy_star - F22_xy_prime
 	
-	F11_yy_star = F11_yy_prime/myyI_b
-	F22_yy_star = F22_yy_prime/myyI_b
-	F12_yy_star = F12_yy_prime/myyI_b
-	
-	F11_xy_star = F11_xy_prime/mxyI_b
-	F22_xy_star = F22_xy_prime/mxyI_b
-	F12_xy_star = F12_xy_prime/mxyI_b
-	
-	D_xx_star = D_xx_prime/mxxI_b
-	D_yy_star = D_yy_prime/myyI_b
-	D_xy_star = D_xy_prime/mxyI_b
-	
-	
-	L_11_xx = J11_xx_star - F11_xx_star
-	L_11_yy = J11_yy_star - F11_yy_star
-	L_11_xy = J11_xy_star - F11_xy_star
-	
-	L_22_xx = J22_xx_star - F22_xx_star
-	L_22_yy = J22_yy_star - F22_yy_star
-	L_22_xy = J22_xy_star - F22_xy_star
-	
-	L_12_xx = 2.0d0 * (J12_xx_star - F12_xx_star)
-	L_12_yy = 2.0d0 * (J12_yy_star - F12_yy_star)
-	L_12_xy = 2.0d0 * (J12_xy_star - F12_xy_star)
+	L_12_xx = 2.0d0 * (J12_xx_star - F12_xx_prime)
+	L_12_yy = 2.0d0 * (J12_yy_star - F12_yy_prime)
+	L_12_xy = 2.0d0 * (J12_xy_star - F12_xy_prime)
 	 
-	R_xx = D_xx_star -  G_prime
-	R_yy = D_yy_star -  G_prime
-	R_xy = D_xy_star -  G_prime
+	R_xx = D_xx_prime -  G_prime * mxxI_b
+	R_yy = D_yy_prime -  G_prime * myyI_b
+	R_xy = D_xy_prime -  G_prime * mxyI_b
 	
 	A_coeff(1,1:3) = (/ L_11_xx, L_22_xx, L_12_xx /) 
 	A_coeff(2,1:3) = (/ L_11_yy, L_22_yy, L_12_yy /)
@@ -1357,7 +1337,6 @@ contains
 	
 	b_coeff(1:3) = (/ R_xx, R_yy, R_xy /) 
 	
-	print*,A_coeff
   	
   	call solve_system(nvar_sys, A_coeff,b_coeff,Mxx_prime_b,Myy_prime_b,Mxy_prime_b)
   	
