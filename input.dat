@@ -4,7 +4,7 @@
 	lattice_type = 9
 /
 &Cylinder
-	ncy = 40
+	ncy = 20
 	L_front = 8
 	L_back = 21
 	L_top = 6
