@@ -30,6 +30,8 @@ program lbm_2d
   real(8), allocatable,dimension(:) :: ux_ref1,uy_ref1,ux_ref2,uy_ref2,ux_ref3,uy_ref3,ux_ref4,uy_ref4
   real(8), allocatable,dimension(:) :: p_ref1,p_ref2,p_ref3,p_ref4
   integer, allocatable,dimension(:,:) :: i_p2,j_p2,i_p3,j_p3,i_p4,j_p4
+  integer, allocatable,dimension(:,:) :: Incs_b, Outs_b
+  
   integer :: i, j, k, l, iter, coord_i,coord_j
   real(8) :: cu
   real(8) :: dx, dy, delx
@@ -134,6 +136,7 @@ program lbm_2d
      	write(*, *) 'Restarting step = ', restart_step
   	end if
 	
+	call finding_incoming_outgoing_pops()
 	
   ! Main loop
   do iter = restart_step+1, max_iter
@@ -192,7 +195,9 @@ program lbm_2d
 			j = bou_j(l)
 			
 			!Original coordinate system:
-			call boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
+			!call boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
+			
+			call numerical_boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
 
 		end do
 	end if
@@ -1208,9 +1213,29 @@ contains
   
   end subroutine apply_bc_incomp
   
-  subroutine numerical_boundary_cases()
+  subroutine numerical_boundary_cases(xi,yj,label,uxp,uyp)
   	implicit none
-  	
+  	integer,intent(in) :: xi,yj,label
+  	real(8),intent(in) :: uxp,uyp
+	integer,dimension(0:q-1) :: Is,Os
+	real(8),dimension(0:q-1) :: A_i,E_i, B11_i, B22_i, B12_i
+  	real(8),dimension(1:3,1:3) :: A_coeff
+  	real(8),dimension(1:3) :: b_coeff
+	real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
+	real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
+	real(8) :: A_prime, E_prime, G_prime, B11_prime, B22_prime, B12_prime
+	real(8) :: D_xx_prime, D_yy_prime, D_xy_prime, J11_prime, J22_prime, J12_prime
+	real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
+	real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
+	real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star, J11_xy_star, J22_xy_star, J12_xy_star
+	real(8) :: F11_xx_star, F22_xx_star, F12_xx_star, F11_yy_star, F22_yy_star, F12_yy_star, F11_xy_star, F22_xy_star, F12_xy_star
+	real(8) :: D_xx_star, D_yy_star, D_xy_star, L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
+	real(8) :: R_xx, R_yy, R_xy, denominator
+	integer :: nvar_sys = 3
+	
+	
+	Is(0:q-1) = Incs_b(label,0:q-1)
+	Os(0:q-1) = Outs_b(label,0:q-1)
   	
   	
   	do k = 0, q-1
@@ -1223,19 +1248,17 @@ contains
   	end do
   	
   	
-  	
   	!gamma,delta = 1,2,3
   	!alpha,beta = x,y,z
   	
   	rhoI_b = 0.0d0; mxxI_b = 0.0d0; myyI_b = 0.0d0; mxyI_b = 0.0d0
+  	A_prime = 0.0d0; E_prime = 0.0d0
 	
-	outsum_xx = 0.0d0; outsum_yy = 0.0d0; outsum_xy = 0.0d0
-	
-	insum1_xx = 0.0d0; 	insum1_yy = 0.0d0; 	insum1_xy = 0.0d0
-	insum2_xx = 0.0d0; 	insum2_yy = 0.0d0; 	insum2_xy = 0.0d0
-	insum3_xx = 0.0d0; 	insum3_yy = 0.0d0; 	insum3_xy = 0.0d0
-	
-	D1_prime = 0.0d0; D2_prime = 0.0d0; D3_prime = 0.0d0 
+	B11_prime = 0.0d0; B22_prime = 0.0d0; B12_prime = 0.0d0
+	D_xx_prime = 0.0d0; D_yy_prime = 0.0d0; D_xy_prime = 0.0d0 
+	F11_xx_prime = 0.0d0; F12_xx_prime = 0.0d0; F22_xx_prime = 0.0d0
+	F11_yy_prime = 0.0d0; F12_yy_prime = 0.0d0; F22_yy_prime = 0.0d0
+	F11_xy_prime = 0.0d0; F12_xy_prime = 0.0d0; F22_xy_prime = 0.0d0
   	
   	do k = 0, q-1
 		if(Os(k)==1) then
@@ -1254,9 +1277,9 @@ contains
 			myyI_b = myyI_b + f(xi,yj,k)*Hyy(k)
 			mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
 			
-			D_xx_prime = D_xx_prime + A_i*Hxx(k)
-			D_yy_prime = D_yy_prime + A_i*Hyy(k)
-			D_xy_prime = D_xy_prime + A_i*Hxy(k)
+			D_xx_prime = D_xx_prime + A_i(k)*Hxx(k)
+			D_yy_prime = D_yy_prime + A_i(k)*Hyy(k)
+			D_xy_prime = D_xy_prime + A_i(k)*Hxy(k)
 			
 			F11_xx_prime = F11_xx_prime + B11_i(k)*Hxx(k)
 			F22_xx_prime = F22_xx_prime + B22_i(k)*Hxx(k)
@@ -1270,16 +1293,12 @@ contains
 			F22_xy_prime = F22_xy_prime + B22_i(k)*Hxy(k)
 			F12_xy_prime = F12_xy_prime + B12_i(k)*Hxy(k)
 			
-			
-			
 		end if
 	end do
 	
 	mxxI_b = mxxI_b/rhoI_b
 	myyI_b = myyI_b/rhoI_b
 	mxyI_b = mxyI_b/rhoI_b
-	
-	D11_xx_prime = 
 	
 	G_prime = (1.0d0 - omega)*A_prime + omega*E_prime
 	
@@ -1311,26 +1330,142 @@ contains
 	F22_xy_star = F22_xy_prime/mxyI_b
 	F12_xy_star = F12_xy_prime/mxyI_b
 	
-	D_xx_star = D_xx_primee/mxxI_b
+	D_xx_star = D_xx_prime/mxxI_b
 	D_yy_star = D_yy_prime/myyI_b
 	D_xy_star = D_xy_prime/mxyI_b
 	
 	
-	XX_xx =  
+	L_11_xx = J11_xx_star - F11_xx_star
+	L_11_yy = J11_yy_star - F11_yy_star
+	L_11_xy = J11_xy_star - F11_xy_star
 	
-	D1_star = D1_prime/mxxI_b
-	D2_star = D2_prime/myyI_b
-	D3_star = D3_prime/mxyI_b
+	L_22_xx = J22_xx_star - F22_xx_star
+	L_22_yy = J22_yy_star - F22_yy_star
+	L_22_xy = J22_xy_star - F22_xy_star
 	
-	R1 = D1_star - 
+	L_12_xx = 2.0d0 * (J12_xx_star - F12_xx_star)
+	L_12_yy = 2.0d0 * (J12_yy_star - F12_yy_star)
+	L_12_xy = 2.0d0 * (J12_xy_star - F12_xy_star)
+	 
+	R_xx = D_xx_star -  G_prime
+	R_yy = D_yy_star -  G_prime
+	R_xy = D_xy_star -  G_prime
+	
+	A_coeff(1,1:3) = (/ L_11_xx, L_22_xx, L_12_xx /) 
+	A_coeff(2,1:3) = (/ L_11_yy, L_22_yy, L_12_yy /)
+	A_coeff(3,1:3) = (/ L_11_xy, L_22_xy, L_12_xy /)  
+	
+	b_coeff(1:3) = (/ R_xx, R_yy, R_xy /) 
+	
+	print*,A_coeff
   	
+  	call solve_system(nvar_sys, A_coeff,b_coeff,Mxx_prime_b,Myy_prime_b,Mxy_prime_b)
   	
+  	denominator = (1.0d0 - omega)*A_prime + (1.0d0 - omega)*(Mxx_prime_b*B11_prime + Myy_prime_b*B22_prime &
+  					& + 2.0d0*Mxy_prime_b*B12_prime) + omega*E_prime
+  	rho_prime_b = rhoI_b/denominator
   	
-  	
-  
-  
+  		do k = 0, q-1
+			f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*uxp*e(k, 1)) &
+								& + (3.0d0*uyp*e(k, 2))  &
+								& + (9.0d0*Mxx_prime_b*Hxx(k)/2.0d0) &
+								& + (9.0d0*Myy_prime_b*Hyy(k)/2.0d0) &
+								& + (9.0d0*Mxy_prime_b*Hxy(k)) )						
+		end do 
+  	  
   
   end subroutine numerical_boundary_cases
+  
+  subroutine solve_system(nvar, A_sys,b_sys,x_11,x_22,x_12)
+  	implicit none
+  	integer,intent(in) :: nvar
+  	real(8),dimension(1:nvar,1:nvar),intent(in) :: A_sys 
+  	real(8),dimension(1:nvar),intent(in) :: b_sys 
+  	real(8),intent(out) :: x_11,x_22,x_12
+  	
+  	! Define the variables
+	real :: a1, a2, a3, b1, b2, b3, c1, c2, c3, d1, d2, d3
+	real :: mxx, myy, mxy
+	real :: denom
+	
+	!SYSTEM OF EQUATIONS
+!	eq1 = a1*mxx + b1*myy + c1*mxy - d1 == 0;
+!	eq2 = a2*mxx + b2*myy + c2*mxy - d2 == 0;
+!	eq3 = a3*mxx + b3*myy + c3*mxy - d3 == 0;
+	
+	a1 = A_sys(1,1); b1 = A_sys(1,2); c1 = A_sys(1,3); d1 = b_sys(1); 
+	a2 = A_sys(2,1); b2 = A_sys(2,2); c2 = A_sys(2,3); d2 = b_sys(2); 
+	a3 = A_sys(3,1); b3 = A_sys(3,2); c3 = A_sys(3,3); d3 = b_sys(3); 
+
+	! Calculate the denominator (common for all three equations)
+	denom = a3*b2*c1 - a2*b3*c1 - a3*b1*c2 + a1*b3*c2 + a2*b1*c3 - a1*b2*c3
+
+	! Calculate mxx, myy, and mxy
+	x_11 = -((-b3*c2*d1 + b2*c3*d1 + b3*c1*d2 - b1*c3*d2 - b2*c1*d3 + b1*c2*d3) / denom)
+
+	x_22 = -((a3*c2*d1 - a2*c3*d1 - a3*c1*d2 + a1*c3*d2 + a2*c1*d3 - a1*c2*d3) / denom)
+
+	x_12 = -((-a3*b2*d1 + a2*b3*d1 + a3*b1*d2 - a1*b3*d2 - a2*b1*d3 + a1*b2*d3) / denom)
+  	
+  
+  end subroutine solve_system
+  
+  subroutine finding_incoming_outgoing_pops()
+  	implicit none
+  	
+  		Incs_b = 0.0d0
+  		Outs_b = 0.0d0
+  		
+  		!case-1
+  		Incs_b(1,0:q-1) = (/ 1, 1, 0, 0, 1, 0, 0, 0, 1 /)
+		Outs_b(1,0:q-1) = (/ 1, 0, 1, 1, 0, 0, 1, 0, 0 /)
+		
+		!case-2
+  		Incs_b(2,0:q-1) = (/ 1, 0, 0, 1, 1, 0, 0, 1, 0 /)
+		Outs_b(2,0:q-1) = (/ 1, 1, 1, 0, 0, 1, 0, 0, 0 /)
+		
+		!case-3
+  		Incs_b(3,0:q-1) = (/ 1, 1, 0, 1, 1, 0, 0, 1, 1 /)
+		Outs_b(3,0:q-1) = (/ 1, 1, 1, 1, 0, 1, 1, 0, 0 /)
+		
+		!case-4
+  		Incs_b(4,0:q-1) = (/ 1, 1, 1, 0, 0, 1, 0, 0, 0 /)
+		Outs_b(4,0:q-1) = (/ 1, 0, 0, 1, 1, 0, 0, 1, 0 /)
+		
+		!case-5
+  		Incs_b(5,0:q-1) = (/ 1, 1, 1, 0, 1, 1, 0, 0, 1 /)
+		Outs_b(5,0:q-1) = (/ 1, 0, 1, 1, 1, 0, 1, 1, 0 /)
+		
+		!case-7
+  		Incs_b(7,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 0, 1, 1 /)
+		Outs_b(7,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 1, 1, 0 /)
+		
+		!case-8
+  		Incs_b(8,0:q-1) = (/ 1, 0, 1, 1, 0, 0, 1, 0, 0 /)
+		Outs_b(8,0:q-1) = (/ 1, 1, 0, 0, 1, 0, 0, 0, 1 /)
+		
+		!case-10
+  		Incs_b(10,0:q-1) = (/ 1, 0, 1, 1, 1, 0, 1, 1, 0 /)
+		Outs_b(10,0:q-1) = (/ 1, 1, 1, 0, 1, 1, 0, 0, 1 /)
+		
+		!case-11
+  		Incs_b(11,0:q-1) = (/ 1, 1, 1, 1, 1, 0, 1, 1, 1 /)
+		Outs_b(11,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 1, 0, 1 /)
+		
+		!case-12
+  		Incs_b(12,0:q-1) = (/ 1, 1, 1, 1, 0, 1, 1, 0, 0 /)
+		Outs_b(12,0:q-1) = (/ 1, 1, 0, 1, 1, 0, 0, 1, 1 /)
+		
+		!case-13
+  		Incs_b(13,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 1, 0, 1 /)
+		Outs_b(13,0:q-1) = (/ 1, 1, 1, 1, 1, 0, 1, 1, 1 /)
+		
+		!case-14
+  		Incs_b(14,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 1, 1, 0 /)
+		Outs_b(14,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 0, 1, 1 /)
+		
+  	
+  end subroutine finding_incoming_outgoing_pops
   
   subroutine boundary_cases(xi,yj,label,uxp,uyp)
 	implicit none
@@ -2037,7 +2172,7 @@ subroutine write_function_plot3d(filename)
   	allocate(mxx(1:nx, 1:ny), myy(1:nx, 1:ny), mxy(1:nx, 1:ny))
   	allocate(er(1:nx, 1:ny),er1(1:nx, 1:ny))
   	allocate(scalar(1:nx, 1:ny))
-  
+  	allocate(Incs_b(0:15, 0:q-1),Outs_b(0:15, 0:q-1))
   
   end subroutine allocate_memory
   
