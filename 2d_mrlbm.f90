@@ -39,7 +39,7 @@ program lbm_2d
   integer :: i, j, k, l, iter, coord_i,coord_j
   real(8) :: cu
   real(8) :: dx, dy, delx
-  real(8) :: error1, frob1,max_radii,rho_inf_mean
+  real(8) :: error1, frob1,max_radii,rho_inf_mean,p_int
   real(8) :: L_phy, nu_phy, u_phy, delx_phy, delt_phy
   real(8) :: L_lat, nu_lat, u_lat, delx_lat, delt_lat
   character (len=6) :: output_dir_name = 'output'//char(0)
@@ -509,6 +509,7 @@ contains
 		    end do
 		 
 			call gaussian_smoothing(nbct,thetavar,pvar,p_fit)
+			call trapz_sub(nbct,thetavar,pvar, p_int)
 				
 			open(unit=101,file="pmean.dat")
 				do k = 1, nbct
@@ -522,6 +523,21 @@ contains
 		end if
 
 	end subroutine calculate_mean
+	
+	subroutine trapz_sub(n_int,x_int, fx_int, integral)
+    implicit none
+    integer, intent(in) :: n_int
+    real(8), intent(in) :: x_int(n_int), fx_int(n_int)
+    real(8), intent(out) :: integral
+    integer :: i
+    real :: dx_int
+
+    integral = 0.0d0
+    do i = 1, n_int - 1
+        dx_int = x_int(i+1) - x_int(i)
+        integral = integral + 0.50d0 * (fx_int(i) + fx_int(i+1)) * dx_int
+    end do
+end subroutine trapz_sub
 	
 	subroutine gaussian_smoothing(n_l,theta_l, p_l, p_smooth_l)
     implicit none

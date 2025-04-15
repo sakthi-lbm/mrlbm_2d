@@ -4,14 +4,14 @@
 	lattice_type = 9
 /
 &Cylinder
-	ncy = 20
+	ncy = 40
 	L_front = 8
 	L_back = 21
 	L_top = 6
 	L_bot = 6
 /
 &Numbers
-	Re =100
+	Re = 200
 /
 &Parallel 
 	  nprocsx = 1
@@ -23,8 +23,8 @@
 	max_iter = 1000000
 	isave = 10000
 	irestart = 1
-	statsbegin = 90001
-	statsend = 200000
+	statsbegin = 200001
+	statsend = 300000
 	iplotstats = 1000
 /
 &LogicalControls
