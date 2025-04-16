@@ -2,6 +2,7 @@ program detect_vortex_cycle
     implicit none
     integer, parameter :: nmax = 900000
     real(8), dimension(nmax) :: time
+     real(8), dimension(nmax) :: signal
     real(8), dimension(nmax) :: p1_signal,p2_signal,p3_signal,p4_signal
     real(8), dimension(nmax) :: ux1_signal,ux2_signal,ux3_signal,ux4_signal
     real(8), dimension(nmax) :: uy1_signal,uy2_signal,uy3_signal,uy4_signal
@@ -22,8 +23,9 @@ program detect_vortex_cycle
     ! Find first two local maxima (peaks)
     peak1 = -1
     peak2 = -1
+    signal = p4_signal
     do i = 2, n-1
-        if (p1_signal(i) > p1_signal(i-1) .and. p1_signal(i) > p1_signal(i+1)) then
+        if (signal(i) > signal(i-1) .and. signal(i) > signal(i+1)) then
             if (peak1 == -1) then
                 peak1 = i
             elseif (peak2 == -1) then
