@@ -37,6 +37,7 @@ program lbm_2d
   integer, allocatable,dimension(:,:) :: i_p2,j_p2,i_p3,j_p3,i_p4,j_p4
   integer, allocatable,dimension(:,:) :: Incs_b, Outs_b
   integer :: i, j, k, l, iter, coord_i,coord_j
+  integer :: i_probe1, j_probe1, i_probe2, j_probe2, i_probe3, j_probe3, i_probe4, j_probe4
   real(8) :: cu
   real(8) :: dx, dy, delx
   real(8) :: error1, frob1,max_radii,rho_inf_mean,p_int
@@ -44,6 +45,9 @@ program lbm_2d
   real(8) :: L_lat, nu_lat, u_lat, delx_lat, delt_lat
   character (len=6) :: output_dir_name = 'output'//char(0)
   character (len=7) :: restart_dir_name = 'restart'//char(0)
+  character (len=10) :: probe_dir_name = 'data_probe'//char(0)
+  character (len=8) :: geo_dir_name = 'data_geo'//char(0)
+  character (len=9) :: mean_dir_name = 'data_mean'//char(0)
   character(len=100) :: filename,filename_bin
   character (len=100) :: bc_type
   logical :: x_periodic, y_periodic, channel_with_cylinder,incomp,channel_with_square
@@ -54,6 +58,9 @@ program lbm_2d
   
   	call create_output_dir_if_needed(output_dir_name,6)
   	call create_output_dir_if_needed(restart_dir_name,7)
+  	call create_output_dir_if_needed(probe_dir_name,10)
+  	call create_output_dir_if_needed(geo_dir_name,8)
+  	call create_output_dir_if_needed(mean_dir_name,9)
   	
   	call read_input_file()
   	
@@ -72,6 +79,26 @@ program lbm_2d
    		call allocate_memory()
   	end if
   	call write_grid_plot3d()
+  	
+  	
+  	!Probes
+  	!=========================================================================================================
+  	i_probe1 = (nfront + ncy + 1) + (ncy/2)
+	j_probe1 = (nbot + (ncy/2) + 1)
+	i_probe2 = (nfront + ncy + 1) + (ncy)
+	j_probe2 = (nbot + (ncy/2) + 1)
+	i_probe3 = (nfront + ncy + 1) + (3*ncy/2)
+	j_probe3 = (nbot + (ncy/2) + 1)
+	i_probe4 = (nfront + ncy + 1) + (2*ncy)
+	j_probe4 = (nbot + (ncy/2) + 1)
+	
+	open(unit=100,file="data_probe/probe_loc.dat")
+		write(100,*) "probe 1: ", i_probe1, j_probe1
+		write(100,*) "probe 2: ", i_probe2, j_probe2
+		write(100,*) "probe 3: ", i_probe3, j_probe3
+		write(100,*) "probe 4: ", i_probe4, j_probe4
+	close(100)
+	!==============================================================================================================
    	
    	dx = 1.0d0
    	dy = 1.0d0
@@ -355,10 +382,28 @@ program lbm_2d
 			end do
 		end do
 	end if
+	
+	if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
+	if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
+	if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
+	
 	if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
 		!Calculating mean quantities
 		call calculate_mean(iter)
 	end if
+	
+	
+	write(101,*) iter, rho(i_probe1,j_probe1)/3.0d0, rho(i_probe2,j_probe2)/3.0d0, &
+					& rho(i_probe3,j_probe3)/3.0d0, rho(i_probe4,j_probe4)/3.0d0 
+	write(102,*) iter, ux(i_probe1,j_probe1)/3.0d0, ux(i_probe2,j_probe2)/3.0d0, &
+					& ux(i_probe3,j_probe3)/3.0d0, ux(i_probe4,j_probe4)/3.0d0 
+	write(103,*) iter, uy(i_probe1,j_probe1)/3.0d0, uy(i_probe2,j_probe2)/3.0d0, &
+					& uy(i_probe3,j_probe3)/3.0d0, uy(i_probe4,j_probe4)/3.0d0
+	
+	if(iter == statsend) close(101)	
+	if(iter == statsend) close(102)	
+	if(iter == statsend) close(103)	
+	
 		
 		frob1=0.0d0
 		do i=1,nx
@@ -394,7 +439,7 @@ program lbm_2d
     end if
     
     if (iter==40*iplot) then
-    	open(unit=105,file='data_center_line.dat')
+    	open(unit=105,file='data_geo/data_center_line.dat')
     		do i = 1, nx
     			write(105,*) x(i,ny/2), rho(i,ny/2),ux(i,ny/2),uy(i,ny/2)
     		end do
@@ -509,9 +554,9 @@ contains
 		    end do
 		 
 			call gaussian_smoothing(nbct,thetavar,pvar,p_fit)
-			call trapz_sub(nbct,thetavar,pvar, p_int)
+!			call trapz_sub(nbct,thetavar,pvar, p_int)
 				
-			open(unit=101,file="pmean.dat")
+			open(unit=101,file="data_mean/pmean.dat")
 				do k = 1, nbct
 					if(thetavar(k) .le. PI) then
 						write(101,*) abs((thetavar(k)*180.0d0/PI)-180.0d0), pvar(k), p_fit(k), &
@@ -957,7 +1002,7 @@ end subroutine trapz_sub
 	
 	ss = 37
 	ee = 37
-	open(unit=10, file='normal.dat', status="replace")
+	open(unit=10, file='data_geo/normal.dat', status="replace")
 		do k = ss, ee
 			write(10,*) x(bou_i(k),bou_j(k)),y(bou_i(k),bou_j(k))
 			write(10,*) x_ref1(k),y_ref1(k)
@@ -991,7 +1036,7 @@ end subroutine trapz_sub
 !		end do
 !	close(10)
 	
-	open(unit=10, file='surface2.dat', status="replace")
+	open(unit=10, file='data_geo/surface2.dat', status="replace")
 		do k = 0, nbct-1
 			thet = k * (2.0d0 * PI / nbct) 
 			x_s = x_c + max_radii*Cos(thet) 
@@ -1001,7 +1046,7 @@ end subroutine trapz_sub
 	close(10)
 	
 	
-	open(unit=10, file='bound.dat', status="replace")
+	open(unit=10, file='data_geo/bound.dat', status="replace")
 	do  i = 1, nx
 		do  j = 1, ny
 			if(isbound(i,j)==1) then
@@ -1013,7 +1058,7 @@ end subroutine trapz_sub
 	end do	
 	close(10)
 	
-	open(unit=20, file='solid.dat', status="replace")
+	open(unit=20, file='data_geo/data_geosolid.dat', status="replace")
 	do  i = 1, nx
 		do  j = 1, ny
 			if(issolid(i,j)==1) then
@@ -1025,7 +1070,7 @@ end subroutine trapz_sub
 	end do	
 	close(20)
 	
-	open(unit=30, file='fluid.dat', status="replace")
+	open(unit=30, file='data_geo/fluid.dat', status="replace")
 	do  i = 1, nx
 		do  j = 1, ny
 			if(isfluid(i,j)==1) then

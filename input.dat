@@ -23,8 +23,8 @@
 	max_iter = 1000000
 	isave = 10000
 	irestart = 1
-	statsbegin = 200001
-	statsend = 300000
+	statsbegin = 220001
+	statsend = 320000
 	iplotstats = 1000
 /
 &LogicalControls
