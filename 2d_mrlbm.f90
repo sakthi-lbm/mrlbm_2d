@@ -56,7 +56,7 @@ program lbm_2d
   character(len=100) :: filename,filename_bin
   character (len=100) :: bc_type
   logical :: x_periodic, y_periodic, channel_with_cylinder,incomp,channel_with_square
-  logical :: vel_interp, mom_interp, rotated_coordinate
+  logical :: vel_interp, mom_interp, rotated_coordinate, post_process
   logical, parameter :: verbose = .true.
   
   	!$ call omp_set_num_threads(num_threads)
@@ -389,6 +389,11 @@ program lbm_2d
 		end do
 	end if
 	
+	
+	!writing output files and statistics:
+	if(post_process) then
+	
+	
 	if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
 	if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
 	if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
@@ -470,19 +475,6 @@ program lbm_2d
 	if(iter == statsend) close(102)	
 	if(iter == statsend) close(103)	
 	
-		
-		frob1=0.0d0
-		do i=1,nx
-			do j=1,ny
-				er(i,j)=abs(ux(i,j)-er1(i,j))
-				frob1=frob1+(er(i,j)**2)
-			end do
-		end do
-		error1=sqrt(frob1)
-		er1(:,:)=ux(:,:)
-	
-	print*,iter,error1
-	
 	if(mod(iter,iplot)==0)then
 		write (filename, 100) 'grid',10000000+iter,'.vtk',char(0)
 		write (filename_bin, 100) 'grid',10000000+iter,'.bin',char(0)
@@ -500,17 +492,27 @@ program lbm_2d
 		call write_function_plot3d(filename_bin)
 	end if
 	
+	end if	!write output condition
+	
+		
+		frob1=0.0d0
+		do i=1,nx
+			do j=1,ny
+				er(i,j)=abs(ux(i,j)-er1(i,j))
+				frob1=frob1+(er(i,j)**2)
+			end do
+		end do
+		error1=sqrt(frob1)
+		er1(:,:)=ux(:,:)
+	
+	print*,iter,error1
+	
+	
+	
 	if (mod(iter, isave) == 0) then 
           call write_restart_file(iter)
     end if
-    
-    if (iter==40*iplot) then
-    	open(unit=105,file='data_geo/data_center_line.dat')
-    		do i = 1, nx
-    			write(105,*) x(i,ny/2), rho(i,ny/2),ux(i,ny/2),uy(i,ny/2)
-    		end do
-    	close(105)
-    end if
+
        
   end do
 
@@ -2501,8 +2503,8 @@ subroutine write_function_plot3d(filename)
     namelist/Numbers/Re
     namelist/Parallel/nprocsx,nprocsy
     namelist/Controls/uo,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats
-    namelist/LogicalControls/x_periodic,y_periodic,channel_with_cylinder,channel_with_square,incomp,vel_interp, &
-    		& mom_interp, rotated_coordinate
+    namelist/LogicalControls/post_process, x_periodic,y_periodic,channel_with_cylinder,channel_with_square, &
+    		& incomp,vel_interp, mom_interp, rotated_coordinate
 
 300 format("Error while reading input.dat file...")
 150 if (iread_error .ne. 0) then 
