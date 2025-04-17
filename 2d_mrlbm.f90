@@ -139,6 +139,7 @@ program lbm_2d
 		write(10,*) 'r_cylin', ncy/2
 		write(10,*) 'centre_cylin', nfront + (ncy/2),nbot + ncy/2 
 		write(10,*) 'Maximum_radius', max_radii
+		write(10,*) 'No. of points on cylinder:', nbct
 		write(10,*) 'Re:', Re
 		write(10,*) 'uo:', uo
 		write(10,*) 'nu:', nu
@@ -1682,15 +1683,10 @@ end subroutine trapz_sub
 	L_12_xx = 2.0d0 * (J12_xx_star - F12_xx_prime)
 	L_12_yy = 2.0d0 * (J12_yy_star - F12_yy_prime)
 	L_12_xy = 2.0d0 * (J12_xy_star - F12_xy_prime)
-	
-	
 	 
 	R_xx = D_xx_prime -  G_prime * mxxI_b
 	R_yy = D_yy_prime -  G_prime * myyI_b
 	R_xy = D_xy_prime -  G_prime * mxyI_b
-	
-	
-	
 	
 	Mxx_prime_b = mxxp(xi, yj)
 	Myy_prime_b = myyp(xi, yj)	
@@ -2568,7 +2564,7 @@ subroutine write_function_plot3d(filename)
 
   1005 format (a4,I8,a4)
   
-  open(unit=10,file='master.p3d')
+  open(unit=10,file='output/master.p3d')
   write(10,*)"{"
   write(10,*)
   write(10,*) '"auto-detect-format"', ": true,"
