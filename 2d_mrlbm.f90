@@ -16,7 +16,7 @@ program lbm_2d
   real(8), allocatable,dimension(:,:) :: x,y,xvar,yvar
   integer :: nbct	!Total number of points on the cylinder boundary
   real*8, allocatable,dimension(:,:) :: boundary
-  integer, allocatable,dimension(:) :: bou_i,bou_j,label_bc
+  integer, allocatable,dimension(:) :: bou_i,bou_j,label_bc,idx
   real(8) :: Re,uo,nu,omega, uinlet,vinlet
   real(8), allocatable,dimension(:) :: w,Hxx,Hyy,Hxy,Hxxy,Hxyy,Hxxyy
   real(8), allocatable,dimension(:, :, :) :: cx_p, cy_p, Hxx_p,Hyy_p,Hxy_p
@@ -31,16 +31,21 @@ program lbm_2d
   real(8), allocatable,dimension(:) :: theta_c,p_mean_cy,radii,xb,yb,delta_uk,pb,p_fit
   real(8), allocatable,dimension(:) :: x_ref1,y_ref1,x_ref2,y_ref2,x_ref3,y_ref3,x_ref4,y_ref4
   real(8), allocatable,dimension(:) :: ux_ref1,uy_ref1,ux_ref2,uy_ref2,ux_ref3,uy_ref3,ux_ref4,uy_ref4
-  real(8), allocatable,dimension(:) :: p_ref1,p_ref2,p_ref3,p_ref4
+  real(8), allocatable,dimension(:) :: var_ref1,var_ref2,var_ref3,var_ref4
   real(8), allocatable,dimension(:) :: mxxp_ref1,mxxp_ref2,mxxp_ref3,mxxp_ref4
   real(8), allocatable,dimension(:) :: myyp_ref1,myyp_ref2,myyp_ref3,myyp_ref4
   integer, allocatable,dimension(:,:) :: i_p2,j_p2,i_p3,j_p3,i_p4,j_p4
   integer, allocatable,dimension(:,:) :: Incs_b, Outs_b
+  real(8), allocatable,dimension(:) :: thetas_cy, ps_cy, mxyps_cy, tws_cy
+  real(8), allocatable,dimension(:) :: theta_cy, p_cy, mxyp_cy, tw_cy
+  real(8), allocatable,dimension(:) :: p_costheta, p_sintheta, tw_costheta, tw_sintheta
+  real(8) :: rho_inf_mean, mean_counter, vis_drag, vis_lift, pres_drag, pres_lift
+  real(8) :: vis_drag_avg, vis_lift_avg, pres_drag_avg, pres_lift_avg
   integer :: i, j, k, l, iter, coord_i,coord_j
   integer :: i_probe1, j_probe1, i_probe2, j_probe2, i_probe3, j_probe3, i_probe4, j_probe4
   real(8) :: cu
   real(8) :: dx, dy, delx
-  real(8) :: error1, frob1,max_radii,rho_inf_mean,p_int
+  real(8) :: error1, frob1,max_radii,p_int
   real(8) :: L_phy, nu_phy, u_phy, delx_phy, delt_phy
   real(8) :: L_lat, nu_lat, u_lat, delx_lat, delt_lat
   character (len=6) :: output_dir_name = 'output'//char(0)
@@ -388,10 +393,70 @@ program lbm_2d
 	if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
 	if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
 	
+	
+	!Statistics
+	!=======================================================================================================
+	
 	if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
-		!Calculating mean quantities
-		call calculate_mean(iter)
+
+		p(:, :) = rho(:, :)/3.0d0
+		call extrapolate_var_on_cylinder(p, p_cy)
+		
+		do i = 1, nx
+			do j = 1, ny 
+				!mxxp(i, j) =  sum(fout(i, j, :) * Hxx_p(i, j, :)) / rho(i, j)
+				!myyp(i, j) =  sum(fout(i, j, :) * Hyy_p(i, j, :)) / rho(i, j)
+				mxyp(i, j) =  sum(fout(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
+			end do
+    	end do
+    	call extrapolate_var_on_cylinder(mxyp, mxyp_cy)
+    	
+		do k = 1,nbct
+			ps_cy(k) = p_cy(idx(k))
+			mxyps_cy(k) = mxyp_cy(idx(k))
+			
+			!wall shear stress
+			tw_cy(k) = (-9.0d0 * nu * omega) * ps_cy(k) * mxyps_cy(k)
+			p_costheta(k)  = ps_cy(k) * cos(thetas_cy(k))
+			p_sintheta(k) = ps_cy(k) * sin(thetas_cy(k))
+			tw_costheta(k)  = tw_cy(k) * cos(thetas_cy(k))
+			tw_sintheta(k)  = tw_cy(k) * sin(thetas_cy(k))
+		end do
+		
+		call trapz_sub(nbct,thetas_cy,p_costheta, pres_drag)
+		call trapz_sub(nbct,thetas_cy,tw_sintheta, vis_drag)
+		call trapz_sub(nbct,thetas_cy,p_sintheta, pres_lift)
+		call trapz_sub(nbct,thetas_cy,tw_costheta, vis_lift)
+		
 	end if
+	
+	!Mean calculation
+	mean_counter = real(iter - statsbegin)
+	rho_inf_mean = ((mean_counter*rho_inf_mean) + rho(1,ny/2) )/(mean_counter + 1.0d0)
+	pres_drag_avg = ((mean_counter*pres_drag_avg) + pres_drag )/(mean_counter + 1.0d0)
+	pres_lift_avg = ((mean_counter*pres_lift_avg) + pres_lift )/(mean_counter + 1.0d0)
+	vis_drag_avg = ((mean_counter*vis_drag_avg) + vis_drag )/(mean_counter + 1.0d0)
+	vis_lift_avg = ((mean_counter*vis_lift_avg) + vis_lift )/(mean_counter + 1.0d0)
+		
+		do k = 1,nbct
+			p_mean_cy(k) = ((mean_counter*p_mean_cy(k)) + ps_cy(k) )/(mean_counter + 1.0d0)	
+		end do
+		
+		if(mod(iter,iplotstats)==0) then
+			call gaussian_smoothing(nbct,thetas_cy,p_mean_cy,p_fit)
+!			call trapz_sub(nbct,thetavar,pvar, p_int)
+				
+			open(unit=101,file="data_mean/pmean.dat")
+				do k = 1, nbct
+					if(thetas_cy(k) .le. PI) then
+						write(101,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), p_mean_cy(k), p_fit(k), &
+								& 2.0d0*(p_mean_cy(k) - (rho_inf_mean/3.0d0))/(rho_inf_mean*0.10d0*0.10d0), &
+								& 2.0d0*(p_fit(k) - (rho_inf_mean/3.0d0))/(rho_inf_mean*0.10d0*0.10d0)
+					end if
+				end do
+			close(101)
+		end if
+	!=======================================================================================================
 	
 	
 	write(101,*) iter, rho(i_probe1,j_probe1)/3.0d0, rho(i_probe2,j_probe2)/3.0d0, &
@@ -468,21 +533,14 @@ program lbm_2d
 
 contains
 
-	subroutine calculate_mean(step)
+	subroutine extrapolate_var_on_cylinder(var_int, int_var_cy)
 		implicit none
-		integer,intent(in) :: step 
-		real(8) :: mean_counter
-		real(8),dimension(1:nbct) :: pvar,thetavar
-		real(8) :: temp_theta,temp_p
-		real(8) :: x1,y1,p1,x2,y2,p2,x3,y3,p3,x4,y4,p4
-		real(8) :: xd,yd,p_0,p_1
-		real(8) :: thet,xs,ys,ps
+		real(8),dimension(1:nx,1:ny),intent(in) :: var_int
+		real(8),dimension(1:nbct),intent(out) :: int_var_cy
+		real(8) :: x1,y1,var1,x2,y2,var2,x3,y3,var3,x4,y4,var4
+		real(8) :: xd,yd,var_0,var_1
+		real(8) :: xs,ys,vars
 		integer :: i,j,k
-
-		p(:,:) = rho(:,:)/3.0d0
-		
-		mean_counter = real(step - statsbegin)
-		rho_inf_mean = ((mean_counter*rho_inf_mean) + rho(1,ny/2) )/(mean_counter + 1.0d0)
 		
 		do k = 1,nbct
 			i = bou_i(k)
@@ -492,28 +550,28 @@ contains
 			xd = (x_ref2(k) - x(i_p2(1,k),j_p2(1,k)))/dx
 			yd = (y_ref2(k) - y(i_p2(1,k),j_p2(1,k)))/dy
 			
-			p_0 = (1.0d0 - xd)*p(i_p2(1,k),j_p2(1,k)) + xd*p(i_p2(2,k),j_p2(2,k))
-			p_1 = (1.0d0 - xd)*p(i_p2(3,k),j_p2(3,k)) + xd*p(i_p2(4,k),j_p2(4,k))
+			var_0 = (1.0d0 - xd)*var_int(i_p2(1,k),j_p2(1,k)) + xd*var_int(i_p2(2,k),j_p2(2,k))
+			var_1 = (1.0d0 - xd)*var_int(i_p2(3,k),j_p2(3,k)) + xd*var_int(i_p2(4,k),j_p2(4,k))
 			
-			p_ref2(k) =  (1.0d0 - yd)*p_0 + yd*p_1
+			var_ref2(k) =  (1.0d0 - yd)*var_0 + yd*var_1
 			
 			!Third reference node: Second fluid point
 			xd = (x_ref3(k) - x(i_p3(1,k),j_p3(1,k)))/dx
 			yd = (y_ref3(k) - y(i_p3(1,k),j_p3(1,k)))/dy
 			
-			p_0 = (1.0d0 - xd)*p(i_p3(1,k),j_p3(1,k)) + xd*p(i_p3(2,k),j_p3(2,k))
-			p_1 = (1.0d0 - xd)*p(i_p3(3,k),j_p3(3,k)) + xd*p(i_p3(4,k),j_p3(4,k))
+			var_0 = (1.0d0 - xd)*var_int(i_p3(1,k),j_p3(1,k)) + xd*var_int(i_p3(2,k),j_p3(2,k))
+			var_1 = (1.0d0 - xd)*var_int(i_p3(3,k),j_p3(3,k)) + xd*var_int(i_p3(4,k),j_p3(4,k))
 			
-			p_ref3(k) =  (1.0d0 - yd)*p_0 + yd*p_1
+			var_ref3(k) =  (1.0d0 - yd)*var_0 + yd*var_1
 			
 			!Fourth reference node: Third fluid point
 			xd = (x_ref4(k) - x(i_p4(1,k),j_p4(1,k)))/dx
 			yd = (y_ref4(k) - y(i_p4(1,k),j_p4(1,k)))/dy
 			
-			p_0 = (1.0d0 - xd)*p(i_p4(1,k),j_p4(1,k)) + xd*p(i_p4(2,k),j_p4(2,k))
-			p_1 = (1.0d0 - xd)*p(i_p4(3,k),j_p4(3,k)) + xd*p(i_p4(4,k),j_p4(4,k))
+			var_0 = (1.0d0 - xd)*var_int(i_p4(1,k),j_p4(1,k)) + xd*var_int(i_p4(2,k),j_p4(2,k))
+			var_1 = (1.0d0 - xd)*var_int(i_p4(3,k),j_p4(3,k)) + xd*var_int(i_p4(4,k),j_p4(4,k))
 			
-			p_ref4(k) =  (1.0d0 - yd)*p_0 + yd*p_1
+			var_ref4(k) =  (1.0d0 - yd)*var_0 + yd*var_1
 			
 			xs = x_ref1(k) - x_c
 			ys = y_ref1(k) - y_c
@@ -524,51 +582,14 @@ contains
 			x4 = x_ref4(k) - x_c
 			y4 = y_ref4(k) - y_c
 			
-			p2 = p_ref2(k)
-			p3 = p_ref3(k)
-			p4 = p_ref4(k)
-			call quadratic_interpolation(x2,y2,p2,x3,y3,p3,x4,y4,p4,xs,ys,ps)
-			p_ref1(k) = ps			
-			
-			p_mean_cy(k) = ((mean_counter*p_mean_cy(k)) + p_ref1(k) )/(mean_counter + 1.0d0)	
-  			!-----------------------------------------------------------------------------
-  			
+			var2 = var_ref2(k)
+			var3 = var_ref3(k)
+			var4 = var_ref4(k)
+			call quadratic_interpolation(x2,y2,var2,x3,y3,var3,x4,y4,var4,xs,ys,vars)
+			int_var_cy(k) = vars			
 		end do
 		
-    	if(mod(step,iplotstats)==0) then
-    		thetavar = theta_c
-			pvar = p_mean_cy
-			do i = 1, nbct - 1
-		        do j = 1, nbct - i
-		            if (thetavar(j) > thetavar(j + 1)) then
-		            
-		                ! Swap theta values
-		                temp_theta = thetavar(j)
-		                thetavar(j) = thetavar(j + 1)
-		                thetavar(j + 1) = temp_theta
-		                
-		                temp_p = pvar(j)
-		                pvar(j) = pvar(j + 1)
-		                pvar(j + 1) = temp_p
-		            end if
-		        end do
-		    end do
-		 
-			call gaussian_smoothing(nbct,thetavar,pvar,p_fit)
-!			call trapz_sub(nbct,thetavar,pvar, p_int)
-				
-			open(unit=101,file="data_mean/pmean.dat")
-				do k = 1, nbct
-					if(thetavar(k) .le. PI) then
-						write(101,*) abs((thetavar(k)*180.0d0/PI)-180.0d0), pvar(k), p_fit(k), &
-								& 2.0d0*(pvar(k) - (rho_inf_mean/3.0d0))/(rho_inf_mean*0.10d0*0.10d0), &
-								& 2.0d0*(p_fit(k) - (rho_inf_mean/3.0d0))/(rho_inf_mean*0.10d0*0.10d0)
-					end if
-				end do
-			close(101)
-		end if
-
-	end subroutine calculate_mean
+	end subroutine extrapolate_var_on_cylinder
 	
 	subroutine trapz_sub(n_int,x_int, fx_int, integral)
     implicit none
@@ -801,7 +822,7 @@ end subroutine trapz_sub
 	real, parameter :: epsilon = 0.5          ! Tolerance for boundary
     integer :: i, j, k,l, cnt, i1,j1,i2,j2,i3,j3,i_temp,j_temp,ss,ee
     real(8) :: thet,x_s,y_s,thet1,thet2,thet_mid,lambda,radi
-    real(8) :: xmid,ymid,epsi,delta_x,delta_y,rr,unit_nx,unit_ny
+    real(8) :: xmid,ymid,epsi,delta_x,delta_y,rr,unit_nx,unit_ny,temp
 
 	epsi = 0.2
     isfluid = 0
@@ -999,6 +1020,28 @@ end subroutine trapz_sub
 			if(theta_c(k) .lt. 0) theta_c(k) = theta_c(k) + 2.0d0*PI
 			
 	end do
+	
+	!Sorting theta values:
+	! Initialize index array
+    do i = 1, nbct
+        idx(i) = i
+    end do
+
+    ! Sort indices based on normalized theta
+    do i = 1, nbct - 1
+        do j = i + 1, nbct
+            if (theta_c(idx(i)) > theta_c(idx(j))) then
+                temp = idx(i)
+                idx(i) = idx(j)
+                idx(j) = temp
+            end if
+        end do
+    end do
+    
+    do i = 1, nbct
+        thetas_cy(i) = theta_c(idx(i))
+    end do
+	
 	!-----------------------------------------------------------------------------------------------
 	
 	ss = 37
@@ -2544,11 +2587,14 @@ subroutine write_function_plot3d(filename)
 	allocate(i_p2(1:4,1:nbct),j_p2(1:4,1:nbct))
 	allocate(i_p3(1:4,1:nbct),j_p3(1:4,1:nbct))
 	allocate(i_p4(1:4,1:nbct),j_p4(1:4,1:nbct))
-	allocate(p_ref1(1:nbct),ux_ref1(1:nbct),uy_ref1(1:nbct),mxxp_ref1(1:nbct),myyp_ref1(1:nbct))
-	allocate(p_ref2(1:nbct),ux_ref2(1:nbct),uy_ref2(1:nbct),mxxp_ref2(1:nbct),myyp_ref2(1:nbct))
-	allocate(p_ref3(1:nbct),ux_ref3(1:nbct),uy_ref3(1:nbct),mxxp_ref3(1:nbct),myyp_ref3(1:nbct))
-	allocate(p_ref4(1:nbct),ux_ref4(1:nbct),uy_ref4(1:nbct),mxxp_ref4(1:nbct),myyp_ref4(1:nbct))
-
+	allocate(var_ref1(1:nbct),ux_ref1(1:nbct),uy_ref1(1:nbct),mxxp_ref1(1:nbct),myyp_ref1(1:nbct))
+	allocate(var_ref2(1:nbct),ux_ref2(1:nbct),uy_ref2(1:nbct),mxxp_ref2(1:nbct),myyp_ref2(1:nbct))
+	allocate(var_ref3(1:nbct),ux_ref3(1:nbct),uy_ref3(1:nbct),mxxp_ref3(1:nbct),myyp_ref3(1:nbct))
+	allocate(var_ref4(1:nbct),ux_ref4(1:nbct),uy_ref4(1:nbct),mxxp_ref4(1:nbct),myyp_ref4(1:nbct))
+	allocate(idx(1:nbct), thetas_cy(1:nbct), ps_cy(1:nbct), mxyps_cy(1:nbct), tws_cy(1:nbct))
+	allocate(theta_cy(1:nbct), p_cy(1:nbct), mxyp_cy(1:nbct), tw_cy(1:nbct))
+	allocate(p_costheta(1:nbct), p_sintheta(1:nbct), tw_costheta(1:nbct), tw_sintheta(1:nbct))
+	
   end subroutine allocate_cylinder_memory
   
   subroutine create_master_p3d_file()
