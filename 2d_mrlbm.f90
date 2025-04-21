@@ -3,32 +3,44 @@ program lbm_2d
   ! Parameters
   real(8), parameter :: PI = 4.0d0*atan(1.0d0)
   integer :: num_threads=16
-  integer :: nx,ny
-  integer :: ncy, L_front,L_back,L_top,L_bot	
-  integer :: nfront,nback,ntop,nbot
-  integer, parameter :: q = 9
-  integer :: lattice_type   
   integer :: nprocsx, nprocsy
-  integer :: iplot, max_iter, isave, irestart, statsbegin,statsend, iplotstats
+  integer :: iplot, max_iter, isave, irestart, statsbegin,statsend, iplotstats, cycle_period
   integer :: restart_step = 1
-  real(8), parameter :: rho0 = 1.0
+  
+  !geometry and grid variables
   integer, allocatable,dimension(:,:) :: isfluid, issolid,isbound
   real(8), allocatable,dimension(:,:) :: x,y,xvar,yvar
   integer :: nbct	!Total number of points on the cylinder boundary
   real*8, allocatable,dimension(:,:) :: boundary
   integer, allocatable,dimension(:) :: bou_i,bou_j,label_bc,idx
+  integer :: nx,ny
+  integer :: ncy, L_front,L_back,L_top,L_bot	
+  integer :: nfront,nback,ntop,nbot
+  real(8) :: x_c,y_c,r_c,distance
+  real(8) :: L_phy, nu_phy, u_phy, delx_phy, delt_phy
+  real(8) :: L_lat, nu_lat, u_lat, delx_lat, delt_lat
+  real(8) :: error1, frob1,max_radii, r_cyl,p_int
+  real(8), allocatable,dimension(:, :) :: er,er1
+  
+  !LBM variables
+  integer, parameter :: q = 9
+  integer :: lattice_type 
+  real(8), parameter :: rho0 = 1.0
   real(8) :: Re,uo,nu,omega, uinlet,vinlet
   real(8), allocatable,dimension(:) :: w,Hxx,Hyy,Hxy,Hxxy,Hxyy,Hxxyy
+  real(8) :: cu
+  real(8) :: dx, dy, delx
   real(8), allocatable,dimension(:, :, :) :: cx_p, cy_p, Hxx_p,Hyy_p,Hxy_p
   integer, allocatable,dimension(:, :) :: e, e_p
   real(8), allocatable,dimension(:, :, :) :: f, f_eq, f_tmp,fin,fout
   real(8), allocatable, dimension(:, :) :: rho, p, ux, uy, mxx, myy, mxy,scalar
+  real(8), allocatable, dimension(:) ::  cth_cyl, sth_cyl
   real(8), allocatable, dimension(:, :) ::  cth_glb, sth_glb, c2th_glb, s2th_glb
   real(8), allocatable, dimension(:) :: uxp_b, uyp_b
   real(8), allocatable, dimension(:,:) :: mxxp, myyp, mxyp
-  real(8) :: x_c,y_c,r_c,distance
-  real(8), allocatable,dimension(:, :) :: er,er1
-  real(8), allocatable,dimension(:) :: theta_c,p_mean_cy,radii,xb,yb,delta_uk,pb,p_fit
+  
+  !Statistics variables
+  real(8), allocatable,dimension(:) :: theta_c,p_mean_cy, tw_mean_cy,radii,xb,yb,delta_uk,pb,p_fit, tw_fit
   real(8), allocatable,dimension(:) :: x_ref1,y_ref1,x_ref2,y_ref2,x_ref3,y_ref3,x_ref4,y_ref4
   real(8), allocatable,dimension(:) :: ux_ref1,uy_ref1,ux_ref2,uy_ref2,ux_ref3,uy_ref3,ux_ref4,uy_ref4
   real(8), allocatable,dimension(:) :: var_ref1,var_ref2,var_ref3,var_ref4
@@ -39,15 +51,13 @@ program lbm_2d
   real(8), allocatable,dimension(:) :: thetas_cy, ps_cy, mxyps_cy, tws_cy
   real(8), allocatable,dimension(:) :: theta_cy, p_cy, mxyp_cy, tw_cy
   real(8), allocatable,dimension(:) :: p_costheta, p_sintheta, tw_costheta, tw_sintheta
-  real(8) :: rho_inf_mean, mean_counter, vis_drag, vis_lift, pres_drag, pres_lift
-  real(8) :: vis_drag_avg, vis_lift_avg, pres_drag_avg, pres_lift_avg
+  real(8) :: rho_inf_mean, p_inf_mean, mean_counter, vis_drag, vis_lift, pres_drag, pres_lift
+  real(8) :: vis_drag_mean, vis_lift_mean, pres_drag_mean, pres_lift_mean
+  real(8) :: F_drag_mean, F_lift_mean, C_drag_mean, C_lift_mean, force_norm, p_norm
   integer :: i, j, k, l, iter, coord_i,coord_j
   integer :: i_probe1, j_probe1, i_probe2, j_probe2, i_probe3, j_probe3, i_probe4, j_probe4
-  real(8) :: cu
-  real(8) :: dx, dy, delx
-  real(8) :: error1, frob1,max_radii,p_int
-  real(8) :: L_phy, nu_phy, u_phy, delx_phy, delt_phy
-  real(8) :: L_lat, nu_lat, u_lat, delx_lat, delt_lat
+  
+  !logics
   character (len=6) :: output_dir_name = 'output'//char(0)
   character (len=7) :: restart_dir_name = 'restart'//char(0)
   character (len=10) :: probe_dir_name = 'data_probe'//char(0)
@@ -119,11 +129,11 @@ program lbm_2d
 	
 	
 	nu    = uinlet * (ny-1)/Re
-	if (channel_with_cylinder) nu    = uinlet *(2.0d0*max_radii)/Re;     				!kinematic viscosity 
+	if (channel_with_cylinder) nu    = uinlet *(2.0d0*r_cyl)/Re;     				!kinematic viscosity 
 	omega = 1.0d0/((3.0*nu)+(1.0d0/2.0d0)) 	!relaxation parameter
 	
 	L_lat = ny-1
-	if (channel_with_cylinder) L_lat = 2.0d0*max_radii
+	if (channel_with_cylinder) L_lat = 2.0d0*r_cyl
 	
 	nu_lat = nu
 	u_lat = uo
@@ -141,9 +151,9 @@ program lbm_2d
 	
 	open(unit=10,file='simulation_parameters.dat')
 		write(10,*) 'nx,ny', nx,ny
-		write(10,*) 'r_cylin', ncy/2
+		write(10,*) 'No. of points on diameter', ncy
 		write(10,*) 'centre_cylin', nfront + (ncy/2),nbot + ncy/2 
-		write(10,*) 'Maximum_radius', max_radii
+		write(10,*) 'Maximum_radius', r_cyl
 		write(10,*) 'No. of points on cylinder:', nbct
 		write(10,*) 'Re:', Re
 		write(10,*) 'uo:', uo
@@ -403,6 +413,8 @@ program lbm_2d
 	!=======================================================================================================
 	
 	if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
+		mean_counter = real(iter - statsbegin)
+		rho_inf_mean = ((mean_counter*rho_inf_mean) + rho(1,ny/2) )/(mean_counter + 1.0d0)
 
 		p(:, :) = rho(:, :)/3.0d0
 		call extrapolate_var_on_cylinder(p, p_cy)
@@ -421,11 +433,13 @@ program lbm_2d
 			mxyps_cy(k) = mxyp_cy(idx(k))
 			
 			!wall shear stress
-			tw_cy(k) = (-9.0d0 * nu * omega) * ps_cy(k) * mxyps_cy(k)
-			p_costheta(k)  = ps_cy(k) * cos(thetas_cy(k))
-			p_sintheta(k) = ps_cy(k) * sin(thetas_cy(k))
-			tw_costheta(k)  = tw_cy(k) * cos(thetas_cy(k))
-			tw_sintheta(k)  = tw_cy(k) * sin(thetas_cy(k))
+			tw_cy(k) = (-3.0d0 * nu * omega) * mxyps_cy(k)
+!			tw_cy(k) = (-9.0d0 * nu * omega) * ps_cy(k) * mxyps_cy(k)
+			p_costheta(k)  = ps_cy(k) * cth_cyl(k)
+			tw_sintheta(k)  = tw_cy(k) * sth_cyl(k)
+			p_sintheta(k) = ps_cy(k) * sth_cyl(k)
+			tw_costheta(k)  = tw_cy(k) * cth_cyl(k)
+			
 		end do
 		
 		call trapz_sub(nbct,thetas_cy,p_costheta, pres_drag)
@@ -436,30 +450,53 @@ program lbm_2d
 	end if
 	
 	!Mean calculation
-	mean_counter = real(iter - statsbegin)
-	rho_inf_mean = ((mean_counter*rho_inf_mean) + rho(1,ny/2) )/(mean_counter + 1.0d0)
-	pres_drag_avg = ((mean_counter*pres_drag_avg) + pres_drag )/(mean_counter + 1.0d0)
-	pres_lift_avg = ((mean_counter*pres_lift_avg) + pres_lift )/(mean_counter + 1.0d0)
-	vis_drag_avg = ((mean_counter*vis_drag_avg) + vis_drag )/(mean_counter + 1.0d0)
-	vis_lift_avg = ((mean_counter*vis_lift_avg) + vis_lift )/(mean_counter + 1.0d0)
+	
+	p_inf_mean = rho_inf_mean/3.0d0
+	pres_drag_mean = ((mean_counter*pres_drag_mean) + pres_drag )/(mean_counter + 1.0d0)
+	pres_lift_mean = ((mean_counter*pres_lift_mean) + pres_lift )/(mean_counter + 1.0d0)
+	vis_drag_mean = ((mean_counter*vis_drag_mean) + vis_drag )/(mean_counter + 1.0d0)
+	vis_lift_mean = ((mean_counter*vis_lift_mean) + vis_lift )/(mean_counter + 1.0d0)
+	
+	!Force calculation:
+	F_drag_mean = r_cyl*(-pres_drag_mean + vis_drag_mean)
+	F_lift_mean = r_cyl*(-pres_lift_mean - vis_lift_mean)
+	
+	!Coefficients:
 		
 		do k = 1,nbct
-			p_mean_cy(k) = ((mean_counter*p_mean_cy(k)) + ps_cy(k) )/(mean_counter + 1.0d0)	
+			p_mean_cy(k) = ((mean_counter*p_mean_cy(k)) + ps_cy(k) )/(mean_counter + 1.0d0)
+			tw_mean_cy(k) = ((mean_counter*tw_mean_cy(k)) + tw_cy(k) )/(mean_counter + 1.0d0)	
 		end do
 		
-		if(mod(iter,iplotstats)==0) then
+		if(mod(iter,cycle_period)==0) then
 			call gaussian_smoothing(nbct,thetas_cy,p_mean_cy,p_fit)
-!			call trapz_sub(nbct,thetavar,pvar, p_int)
+			call gaussian_smoothing(nbct,thetas_cy,tw_mean_cy,tw_fit)
+			
+			force_norm = r_cyl*rho_inf_mean*(uo**2)
+			p_norm = 0.50d0*rho_inf_mean*(uo**2)
+			C_drag_mean = F_drag_mean/force_norm
+			C_lift_mean = F_lift_mean/force_norm
 				
-			open(unit=101,file="data_mean/pmean.dat")
+			open(unit=101,file="data_mean/p_coeff.dat")
 				do k = 1, nbct
 					if(thetas_cy(k) .le. PI) then
-						write(101,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), p_mean_cy(k), p_fit(k), &
-								& 2.0d0*(p_mean_cy(k) - (rho_inf_mean/3.0d0))/(rho_inf_mean*0.10d0*0.10d0), &
-								& 2.0d0*(p_fit(k) - (rho_inf_mean/3.0d0))/(rho_inf_mean*0.10d0*0.10d0)
+						write(101,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), (p_mean_cy(k) - p_inf_mean)/p_norm, &
+										&  (p_fit(k) - p_inf_mean)/p_norm
 					end if
 				end do
 			close(101)
+			open(unit=102,file="data_mean/skin_friction.dat")
+				do k = 1, nbct
+					if(thetas_cy(k) .le. PI) then
+						write(102,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), tw_mean_cy(k)/p_norm, tw_fit(k)/p_norm
+					end if
+				end do
+			close(102)
+			
+			open(unit=103,file="data_mean/coefficients.dat")
+				write(103,*) "Drag, C_D:", C_drag_mean
+				write(103,*) "Lift, C_L:", C_lift_mean
+			close(103)
 		end if
 	!=======================================================================================================
 	
@@ -939,6 +976,8 @@ end subroutine trapz_sub
 			max_radii = radii(k)
 		end if
 	end do
+	
+	r_cyl = max_radii
 
 	
 	!Finding boundary and two fluid nodes for velocity interpolation
@@ -951,8 +990,8 @@ end subroutine trapz_sub
 			  if (rr > 1.0e-12) then
 				unit_nx = (x(bou_i(k),bou_j(k)) - x_c)/rr
 				unit_ny = (y(bou_i(k),bou_j(k)) - y_c)/rr
-				xb(k) = x_c + (max_radii*unit_nx)
-				yb(k) = y_c + (max_radii*unit_ny)
+				xb(k) = x_c + (r_cyl*unit_nx)
+				yb(k) = y_c + (r_cyl*unit_ny)
 			  else
 				 ! Point is exactly at center
 				 unit_nx = 0.0
@@ -960,6 +999,9 @@ end subroutine trapz_sub
 				 xb(k) = x_c
 				 yb(k) = y_c
 			  end if
+			  
+			  cth_cyl(k) = unit_nx
+			  sth_cyl(k) = unit_ny
 			  
 			  x_ref1(k) = xb(k)
 			  y_ref1(k) = yb(k)
@@ -1085,8 +1127,8 @@ end subroutine trapz_sub
 	open(unit=10, file='data_geo/surface2.dat', status="replace")
 		do k = 0, nbct-1
 			thet = k * (2.0d0 * PI / nbct) 
-			x_s = x_c + max_radii*Cos(thet) 
-			y_s = y_c + max_radii*Sin(thet)
+			x_s = x_c + r_cyl*Cos(thet) 
+			y_s = y_c + r_cyl*Sin(thet)
 			write(10,*) x_s,y_s
 		end do
 	close(10)
@@ -2502,7 +2544,7 @@ subroutine write_function_plot3d(filename)
     namelist/Cylinder/ncy,L_front,L_back,L_top,L_bot
     namelist/Numbers/Re
     namelist/Parallel/nprocsx,nprocsy
-    namelist/Controls/uo,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats
+    namelist/Controls/uo,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats, cycle_period
     namelist/LogicalControls/post_process, x_periodic,y_periodic,channel_with_cylinder,channel_with_square, &
     		& incomp,vel_interp, mom_interp, rotated_coordinate
 
@@ -2577,11 +2619,11 @@ subroutine write_function_plot3d(filename)
   	!Allocating variables after the get_coord subroutine execution:
   	allocate(bou_i(1:nbct),bou_j(1:nbct))
 	allocate(label_bc(1:nbct),theta_c(1:nbct))
-	allocate(p_mean_cy(1:nbct))
+	allocate(p_mean_cy(1:nbct), tw_mean_cy(1:nbct))
 	allocate(uxp_b(1:nbct),uyp_b(1:nbct))
 	allocate(radii(1:nbct))
 	allocate(xb(1:nbct),yb(1:nbct))
-	allocate(delta_uk(1:nbct),pb(1:nbct),p_fit(1:nbct))
+	allocate(delta_uk(1:nbct),pb(1:nbct),p_fit(1:nbct),tw_fit(1:nbct))
 	allocate(x_ref1(1:nbct),y_ref1(1:nbct))
 	allocate(x_ref2(1:nbct),y_ref2(1:nbct))
 	allocate(x_ref3(1:nbct),y_ref3(1:nbct))
@@ -2596,6 +2638,7 @@ subroutine write_function_plot3d(filename)
 	allocate(idx(1:nbct), thetas_cy(1:nbct), ps_cy(1:nbct), mxyps_cy(1:nbct), tws_cy(1:nbct))
 	allocate(theta_cy(1:nbct), p_cy(1:nbct), mxyp_cy(1:nbct), tw_cy(1:nbct))
 	allocate(p_costheta(1:nbct), p_sintheta(1:nbct), tw_costheta(1:nbct), tw_sintheta(1:nbct))
+	allocate(cth_cyl(1:nbct),sth_cyl(1:nbct))
 	
   end subroutine allocate_cylinder_memory
   

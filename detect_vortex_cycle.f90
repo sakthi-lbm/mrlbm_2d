@@ -19,7 +19,101 @@ program detect_vortex_cycle
 	100 continue
     close(10)
     n = n - 1
+	
+	!Point-1
+    !-------------------------------------------------------------------------------------------------------
+    ! Find first two local maxima (peaks)
+    peak1 = -1
+    peak2 = -1
+    signal = p2_signal
+    do i = 2, n-1
+        if (signal(i) > signal(i-1) .and. signal(i) > signal(i+1)) then
+            if (peak1 == -1) then
+                peak1 = i
+            elseif (peak2 == -1) then
+                peak2 = i
+                exit
+            end if
+        end if
+    end do
 
+    if (peak1 == -1 .or. peak2 == -1) then
+        print *, 'Error: Could not detect two peaks.'
+        stop
+    end if
+
+    ! Compute and print cycle information
+    period = time(peak2) - time(peak1)
+    print *, 'POINT-1'
+    print *, 'Start of vortex cycle: t =', time(peak1)
+    print *, 'End   of vortex cycle: t =', time(peak2)
+    print *, 'Shedding period      T =', nint(period)
+    print *, ' '
+    
+    
+    !Point-2
+    !-------------------------------------------------------------------------------------------------------
+    ! Find first two local maxima (peaks)
+    peak1 = -1
+    peak2 = -1
+    signal = p2_signal
+    do i = 2, n-1
+        if (signal(i) > signal(i-1) .and. signal(i) > signal(i+1)) then
+            if (peak1 == -1) then
+                peak1 = i
+            elseif (peak2 == -1) then
+                peak2 = i
+                exit
+            end if
+        end if
+    end do
+
+    if (peak1 == -1 .or. peak2 == -1) then
+        print *, 'Error: Could not detect two peaks.'
+        stop
+    end if
+
+    ! Compute and print cycle information
+    period = time(peak2) - time(peak1)
+    print *, 'POINT-2'
+    print *, 'Start of vortex cycle: t =', time(peak1)
+    print *, 'End   of vortex cycle: t =', time(peak2)
+    print *, 'Shedding period      T =', nint(period)
+    print *, ' '
+    
+    
+    !Point-3
+    !-------------------------------------------------------------------------------------------------------
+    ! Find first two local maxima (peaks)
+    peak1 = -1
+    peak2 = -1
+    signal = p3_signal
+    do i = 2, n-1
+        if (signal(i) > signal(i-1) .and. signal(i) > signal(i+1)) then
+            if (peak1 == -1) then
+                peak1 = i
+            elseif (peak2 == -1) then
+                peak2 = i
+                exit
+            end if
+        end if
+    end do
+
+    if (peak1 == -1 .or. peak2 == -1) then
+        print *, 'Error: Could not detect two peaks.'
+        stop
+    end if
+
+    ! Compute and print cycle information
+    period = time(peak2) - time(peak1)
+    print *, 'POINT-3'
+    print *, 'Start of vortex cycle: t =', time(peak1)
+    print *, 'End   of vortex cycle: t =', time(peak2)
+    print *, 'Shedding period      T =', nint(period)
+    print *, ' '
+    
+    !Point-4
+    !-------------------------------------------------------------------------------------------------------
     ! Find first two local maxima (peaks)
     peak1 = -1
     peak2 = -1
@@ -42,9 +136,11 @@ program detect_vortex_cycle
 
     ! Compute and print cycle information
     period = time(peak2) - time(peak1)
+    print *, 'POINT-4'
     print *, 'Start of vortex cycle: t =', time(peak1)
     print *, 'End   of vortex cycle: t =', time(peak2)
-    print *, 'Shedding period      T =', period
+    print *, 'Shedding period      T =', nint(period)
+    print *, ' '
 
 end program detect_vortex_cycle
 

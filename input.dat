@@ -11,7 +11,7 @@
 	L_bot = 9
 /
 &Numbers
-	Re = 200
+	Re = 100
 /
 &Parallel 
 	  nprocsx = 1
@@ -22,13 +22,14 @@
 	iplot = 1000
 	max_iter = 90000000
 	isave = 10000
-	irestart = 0
-	statsbegin = 220001
-	statsend = 320000
+	irestart = 1
+	statsbegin = 150001
+	statsend = 160001
 	iplotstats = 1000
+	cycle_period = 100
 /
 &LogicalControls
-	post_process = .false.
+	post_process = .true.
 	x_periodic = .false.
 	y_periodic = .true.
 	channel_with_cylinder = .true.
