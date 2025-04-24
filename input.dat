@@ -23,10 +23,11 @@
 	max_iter = 90000000
 	isave = 10000
 	irestart = 1
-	statsbegin = 150001
-	statsend = 160001
+	statsbegin = 261367
+	statsend = 284977
 	iplotstats = 1000
-	cycle_period = 100
+	cycle_period = 2361
+
 /
 &LogicalControls
 	post_process = .true.

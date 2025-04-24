@@ -6,9 +6,11 @@ program detect_vortex_cycle
     real(8), dimension(nmax) :: p1_signal,p2_signal,p3_signal,p4_signal
     real(8), dimension(nmax) :: ux1_signal,ux2_signal,ux3_signal,ux4_signal
     real(8), dimension(nmax) :: uy1_signal,uy2_signal,uy3_signal,uy4_signal
-    integer :: i, n, peak1, peak2
+    integer :: i, n, peak1, peak2, n_cycle
     real(8) :: period
-
+	
+	n_cycle = 10
+	
     ! Read the data
     open(unit=10, file='data_probe/uy_probe.dat', status='old')
     n = 0
@@ -48,6 +50,8 @@ program detect_vortex_cycle
     print *, 'Start of vortex cycle: t =', time(peak1)
     print *, 'End   of vortex cycle: t =', time(peak2)
     print *, 'Shedding period      T =', nint(period)
+    print *, 'START: t =', nint(time(peak1))
+    print *, 'END (10cyl): t =', nint(time(peak1)) + nint(n_cycle*period)
     print *, ' '
     
     
@@ -74,11 +78,12 @@ program detect_vortex_cycle
     end if
 
     ! Compute and print cycle information
-    period = time(peak2) - time(peak1)
     print *, 'POINT-2'
     print *, 'Start of vortex cycle: t =', time(peak1)
     print *, 'End   of vortex cycle: t =', time(peak2)
     print *, 'Shedding period      T =', nint(period)
+    print *, 'START: t =', nint(time(peak1))
+    print *, 'END (10cyl): t =', nint(time(peak1)) + nint(n_cycle*period)
     print *, ' '
     
     
@@ -110,6 +115,8 @@ program detect_vortex_cycle
     print *, 'Start of vortex cycle: t =', time(peak1)
     print *, 'End   of vortex cycle: t =', time(peak2)
     print *, 'Shedding period      T =', nint(period)
+    print *, 'START: t =', nint(time(peak1))
+    print *, 'END (10cyl): t =', nint(time(peak1)) + nint(n_cycle*period)
     print *, ' '
     
     !Point-4
@@ -140,6 +147,8 @@ program detect_vortex_cycle
     print *, 'Start of vortex cycle: t =', time(peak1)
     print *, 'End   of vortex cycle: t =', time(peak2)
     print *, 'Shedding period      T =', nint(period)
+    print *, 'START: t =', nint(time(peak1))
+    print *, 'END (10cyl): t =', nint(time(peak1)) + nint(n_cycle*period)
     print *, ' '
 
 end program detect_vortex_cycle

@@ -19,7 +19,7 @@ program lbm_2d
   real(8) :: x_c,y_c,r_c,distance
   real(8) :: L_phy, nu_phy, u_phy, delx_phy, delt_phy
   real(8) :: L_lat, nu_lat, u_lat, delx_lat, delt_lat
-  real(8) :: error1, frob1,max_radii, r_cyl,p_int
+  real(8) :: error1, frob1,max_radii, r_cyl,p_int, ul2norm 
   real(8), allocatable,dimension(:, :) :: er,er1
   
   !LBM variables
@@ -34,7 +34,8 @@ program lbm_2d
   integer, allocatable,dimension(:, :) :: e, e_p
   real(8), allocatable,dimension(:, :, :) :: f, f_eq, f_tmp,fin,fout
   real(8), allocatable, dimension(:, :) :: rho, p, ux, uy, mxx, myy, mxy,scalar
-  real(8), allocatable, dimension(:) ::  cth_cyl, sth_cyl
+  real(8), allocatable, dimension(:, :) :: ux_prev, uy_prev
+  real(8), allocatable, dimension(:) ::  cth_cyl, sth_cyl, cths_cyl, sths_cyl
   real(8), allocatable, dimension(:, :) ::  cth_glb, sth_glb, c2th_glb, s2th_glb
   real(8), allocatable, dimension(:) :: uxp_b, uyp_b
   real(8), allocatable, dimension(:,:) :: mxxp, myyp, mxyp
@@ -51,7 +52,7 @@ program lbm_2d
   real(8), allocatable,dimension(:) :: thetas_cy, ps_cy, mxyps_cy, tws_cy
   real(8), allocatable,dimension(:) :: theta_cy, p_cy, mxyp_cy, tw_cy
   real(8), allocatable,dimension(:) :: p_costheta, p_sintheta, tw_costheta, tw_sintheta
-  real(8) :: rho_inf_mean, p_inf_mean, mean_counter, vis_drag, vis_lift, pres_drag, pres_lift
+  real(8) :: rho_inf_mean, p_inf_mean, mean_counter, rho_mean_counter, vis_drag, vis_lift, pres_drag, pres_lift
   real(8) :: vis_drag_mean, vis_lift_mean, pres_drag_mean, pres_lift_mean
   real(8) :: F_drag_mean, F_lift_mean, C_drag_mean, C_lift_mean, force_norm, p_norm
   integer :: i, j, k, l, iter, coord_i,coord_j
@@ -213,10 +214,17 @@ program lbm_2d
 		  rho(i, j) = sum(f(i, j, :))
 		  ux(i, j) = sum(f(i, j, :) * e(:, 1)) / rho(i, j)
 		  uy(i, j) = sum(f(i, j, :) * e(:, 2)) / rho(i, j)
+		  mxx(i, j) =  sum(f(i, j, :) * Hxx(:)) / rho(i, j)
+		  myy(i, j) =  sum(f(i, j, :) * Hyy(:)) / rho(i, j)
+		  mxy(i, j) =  sum(f(i, j, :) * Hxy(:)) / rho(i, j)
 		end do
     end do
     !$omp end parallel do
-	
+    
+    !Free-density: Mean inlet density
+    rho_mean_counter = real(iter - restart_step)
+    rho_inf_mean = ((rho_mean_counter*rho_inf_mean) + rho(1,ny/2) )/(rho_mean_counter + 1.0d0)
+	p_inf_mean = rho_inf_mean/3.0d0
 		
 	!Boundary conditions:  MACROSCOPIC (DIRICHLET)
 	
@@ -325,32 +333,18 @@ program lbm_2d
 
 	!=============================================================================================================================
 	
-    ! Collision step
-	!----------------------------------------------------------------------------------------------------
-		!$omp parallel do collapse(2) private(cu, k) shared(e, ux, uy, rho, w, f_eq, fout, f, omega)
-    	do i = 1, nx
-		  do j = 1, ny
-		    do k = 0, q-1
-			  cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
-		      f_eq(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) + (4.50d0*(cu*cu)) - &
-									& 1.50d0*( ux(i, j)*ux(i, j) + uy(i, j)*uy(i, j)) )
-		      fout(i, j, k) = f(i, j, k) - omega * (f(i, j, k) - f_eq(i, j, k))
-		    end do
-		  end do
-    	end do
-    	!$omp end parallel do
-	
-	! *** Modifying non-equilibrium moments with post-collisional populations***
+    !Collision - Moments space ***
+    !----------------------------------------------------------------------------------------------------	
 	!$omp parallel do collapse(2) shared(rho, mxx,myy,mxy, Hxx,Hyy,Hxy, fout)
 	do i = 1, nx
 		do j = 1, ny 
-			mxx(i, j) =  sum(fout(i, j, :) * Hxx(:)) / rho(i, j)
-			myy(i, j) =  sum(fout(i, j, :) * Hyy(:)) / rho(i, j)
-			mxy(i, j) =  sum(fout(i, j, :) * Hxy(:)) / rho(i, j)
+			mxx(i, j) =  (1.0d0 - omega)*mxx(i, j) + omega*ux(i, j)*ux(i, j)
+			myy(i, j) =  (1.0d0 - omega)*myy(i, j) + omega*uy(i, j)*uy(i, j)
+			mxy(i, j) =  (1.0d0 - omega)*mxy(i, j) + omega*ux(i, j)*uy(i, j)
 		end do
     end do
     !$omp end parallel do
-	
+!	
 	
 	!Kinetic Projection / Regularization (using modified moments)
 	!----------------------------------------------------------------------------------------------------	
@@ -370,6 +364,7 @@ program lbm_2d
 	
 	
     ! Streaming step
+    !----------------------------------------------------------------------------------------------------	
     f_tmp = fout
     do i = 1, nx
       do j = 1, ny
@@ -403,147 +398,64 @@ program lbm_2d
 	!writing output files and statistics:
 	if(post_process) then
 	
-	
-	if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
-	if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
-	if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
-	
-	
-	!Statistics
-	!=======================================================================================================
-	
-	if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
-		mean_counter = real(iter - statsbegin)
-		rho_inf_mean = ((mean_counter*rho_inf_mean) + rho(1,ny/2) )/(mean_counter + 1.0d0)
-
-		p(:, :) = rho(:, :)/3.0d0
-		call extrapolate_var_on_cylinder(p, p_cy)
+		if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
+		if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
+		if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
 		
-		do i = 1, nx
-			do j = 1, ny 
-				!mxxp(i, j) =  sum(fout(i, j, :) * Hxx_p(i, j, :)) / rho(i, j)
-				!myyp(i, j) =  sum(fout(i, j, :) * Hyy_p(i, j, :)) / rho(i, j)
-				mxyp(i, j) =  sum(fout(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
-			end do
-    	end do
-    	call extrapolate_var_on_cylinder(mxyp, mxyp_cy)
-    	
-		do k = 1,nbct
-			ps_cy(k) = p_cy(idx(k))
-			mxyps_cy(k) = mxyp_cy(idx(k))
+		write(101,*) iter, rho(i_probe1,j_probe1)/3.0d0, rho(i_probe2,j_probe2)/3.0d0, &
+						& rho(i_probe3,j_probe3)/3.0d0, rho(i_probe4,j_probe4)/3.0d0 
+		write(102,*) iter, ux(i_probe1,j_probe1)/3.0d0, ux(i_probe2,j_probe2)/3.0d0, &
+						& ux(i_probe3,j_probe3)/3.0d0, ux(i_probe4,j_probe4)/3.0d0 
+		write(103,*) iter, uy(i_probe1,j_probe1)/3.0d0, uy(i_probe2,j_probe2)/3.0d0, &
+						& uy(i_probe3,j_probe3)/3.0d0, uy(i_probe4,j_probe4)/3.0d0
+		
+		if(iter == statsend) close(101)	
+		if(iter == statsend) close(102)	
+		if(iter == statsend) close(103)	
+		
+		
+		!Statistics
+		!=======================================================================================================
+		
+		if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
 			
-			!wall shear stress
-			tw_cy(k) = (-3.0d0 * nu * omega) * mxyps_cy(k)
-!			tw_cy(k) = (-9.0d0 * nu * omega) * ps_cy(k) * mxyps_cy(k)
-			p_costheta(k)  = ps_cy(k) * cth_cyl(k)
-			tw_sintheta(k)  = tw_cy(k) * sth_cyl(k)
-			p_sintheta(k) = ps_cy(k) * sth_cyl(k)
-			tw_costheta(k)  = tw_cy(k) * cth_cyl(k)
+			call time_averaging_statistics(iter)
 			
-		end do
-		
-		call trapz_sub(nbct,thetas_cy,p_costheta, pres_drag)
-		call trapz_sub(nbct,thetas_cy,tw_sintheta, vis_drag)
-		call trapz_sub(nbct,thetas_cy,p_sintheta, pres_lift)
-		call trapz_sub(nbct,thetas_cy,tw_costheta, vis_lift)
-		
-	end if
-	
-	!Mean calculation
-	
-	p_inf_mean = rho_inf_mean/3.0d0
-	pres_drag_mean = ((mean_counter*pres_drag_mean) + pres_drag )/(mean_counter + 1.0d0)
-	pres_lift_mean = ((mean_counter*pres_lift_mean) + pres_lift )/(mean_counter + 1.0d0)
-	vis_drag_mean = ((mean_counter*vis_drag_mean) + vis_drag )/(mean_counter + 1.0d0)
-	vis_lift_mean = ((mean_counter*vis_lift_mean) + vis_lift )/(mean_counter + 1.0d0)
-	
-	!Force calculation:
-	F_drag_mean = r_cyl*(-pres_drag_mean + vis_drag_mean)
-	F_lift_mean = r_cyl*(-pres_lift_mean - vis_lift_mean)
-	
-	!Coefficients:
-		
-		do k = 1,nbct
-			p_mean_cy(k) = ((mean_counter*p_mean_cy(k)) + ps_cy(k) )/(mean_counter + 1.0d0)
-			tw_mean_cy(k) = ((mean_counter*tw_mean_cy(k)) + tw_cy(k) )/(mean_counter + 1.0d0)	
-		end do
-		
-		if(mod(iter,cycle_period)==0) then
-			call gaussian_smoothing(nbct,thetas_cy,p_mean_cy,p_fit)
-			call gaussian_smoothing(nbct,thetas_cy,tw_mean_cy,tw_fit)
-			
-			force_norm = r_cyl*rho_inf_mean*(uo**2)
-			p_norm = 0.50d0*rho_inf_mean*(uo**2)
-			C_drag_mean = F_drag_mean/force_norm
-			C_lift_mean = F_lift_mean/force_norm
+			if(mod((iter-statsbegin),cycle_period)==0) then
 				
-			open(unit=101,file="data_mean/p_coeff.dat")
-				do k = 1, nbct
-					if(thetas_cy(k) .le. PI) then
-						write(101,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), (p_mean_cy(k) - p_inf_mean)/p_norm, &
-										&  (p_fit(k) - p_inf_mean)/p_norm
-					end if
-				end do
-			close(101)
-			open(unit=102,file="data_mean/skin_friction.dat")
-				do k = 1, nbct
-					if(thetas_cy(k) .le. PI) then
-						write(102,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), tw_mean_cy(k)/p_norm, tw_fit(k)/p_norm
-					end if
-				end do
-			close(102)
+				call write_statistics_out()
+				
+			end if
 			
-			open(unit=103,file="data_mean/coefficients.dat")
-				write(103,*) "Drag, C_D:", C_drag_mean
-				write(103,*) "Lift, C_L:", C_lift_mean
-			close(103)
 		end if
-	!=======================================================================================================
-	
-	
-	write(101,*) iter, rho(i_probe1,j_probe1)/3.0d0, rho(i_probe2,j_probe2)/3.0d0, &
-					& rho(i_probe3,j_probe3)/3.0d0, rho(i_probe4,j_probe4)/3.0d0 
-	write(102,*) iter, ux(i_probe1,j_probe1)/3.0d0, ux(i_probe2,j_probe2)/3.0d0, &
-					& ux(i_probe3,j_probe3)/3.0d0, ux(i_probe4,j_probe4)/3.0d0 
-	write(103,*) iter, uy(i_probe1,j_probe1)/3.0d0, uy(i_probe2,j_probe2)/3.0d0, &
-					& uy(i_probe3,j_probe3)/3.0d0, uy(i_probe4,j_probe4)/3.0d0
-	
-	if(iter == statsend) close(101)	
-	if(iter == statsend) close(102)	
-	if(iter == statsend) close(103)	
-	
-	if(mod(iter,iplot)==0)then
-		write (filename, 100) 'grid',10000000+iter,'.vtk',char(0)
-		write (filename_bin, 100) 'grid',10000000+iter,'.bin',char(0)
-		100 format (a4,I8,a4,a1)
-		if(channel_with_cylinder .or. channel_with_square) then
-			do  i = 1, nx
-				do  j = 1, ny
-					if(issolid(i,j)==1) then
-						ux(i,j) = 0.0d0
-						uy(i,j) = 0.0d0
-					end if
+			
+		!=======================================================================================================
+
+		!output binary files	
+		if(mod(iter,iplot)==0)then
+			write (filename, 100) 'grid',10000000+iter,'.vtk',char(0)
+			write (filename_bin, 100) 'grid',10000000+iter,'.bin',char(0)
+			100 format (a4,I8,a4,a1)
+			if(channel_with_cylinder .or. channel_with_square) then
+				do  i = 1, nx
+					do  j = 1, ny
+						if(issolid(i,j)==1) then
+							ux(i,j) = 0.0d0
+							uy(i,j) = 0.0d0
+						end if
+					end do
 				end do
-			end do
+			end if
+			call write_function_plot3d(filename_bin)
 		end if
-		call write_function_plot3d(filename_bin)
-	end if
 	
 	end if	!write output condition
 	
-		
-		frob1=0.0d0
-		do i=1,nx
-			do j=1,ny
-				er(i,j)=abs(ux(i,j)-er1(i,j))
-				frob1=frob1+(er(i,j)**2)
-			end do
-		end do
-		error1=sqrt(frob1)
-		er1(:,:)=ux(:,:)
-	
-	print*,iter,error1
-	
+	 call calculate_norm(ul2norm)
+
+       if (mod(iter, 100) == 0) then 
+          write(*, *) "STEP: ",iter ,"     ", "VEL_NORM: ",  ul2norm 
+       end if
 	
 	
 	if (mod(iter, isave) == 0) then 
@@ -552,25 +464,99 @@ program lbm_2d
 
        
   end do
-
   
-  write (filename, 100) 'grid',10000000+iter,'.vtk',char(0)
-  write (filename_bin, 100) 'grid',10000000+iter,'.bin',char(0)
-	if(channel_with_cylinder .or. channel_with_square) then
-		do  i = 1, nx
-			do  j = 1, ny
-				if(issolid(i,j)==1) then
-					ux(i,j) = 0.0d0
-					uy(i,j) = 0.0d0
-				end if
-			end do
-		end do
-	end if
-  ! call output_vtk(filename)
-  call write_function_plot3d(filename_bin)
-  
-
 contains
+
+	subroutine write_statistics_out()
+		implicit none
+		integer :: i, j, k
+		
+			do k = 1, nbct
+				p_costheta(k)  = p_mean_cy(k) * cths_cyl(k)
+				tw_sintheta(k) = tw_mean_cy(k) * sths_cyl(k)
+				p_sintheta(k)  = p_mean_cy(k) * sths_cyl(k)
+				tw_costheta(k) = tw_mean_cy(k) * cths_cyl(k)
+			end do
+	
+			call trapezoidal_sub(nbct,thetas_cy,p_costheta, pres_drag)
+			call trapezoidal_sub(nbct,thetas_cy,tw_sintheta, vis_drag)
+			call trapezoidal_sub(nbct,thetas_cy,p_sintheta, pres_lift)
+			call trapezoidal_sub(nbct,thetas_cy,tw_costheta, vis_lift)
+			
+			print*,iter, pres_drag, vis_drag, pres_lift, vis_lift
+			
+			!Force calculation:
+			F_drag_mean = r_cyl*(-pres_drag + vis_drag)
+			F_lift_mean = r_cyl*(-pres_lift - vis_lift)
+			
+!			print*,iter, F_drag_mean, F_lift_mean
+			
+			!Coefficients:
+			force_norm = r_cyl*rho_inf_mean*(uo**2)
+			p_norm = 0.50d0*rho_inf_mean*(uo**2)
+			C_drag_mean = F_drag_mean/force_norm
+			C_lift_mean = F_lift_mean/force_norm
+				
+			open(unit=201,file="data_mean/p_coeff.dat")
+				do k = 1, nbct
+					if(thetas_cy(k) .le. PI) then
+						write(201,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), (p_mean_cy(k) - p_inf_mean)/p_norm, &
+										&  (p_fit(k) - p_inf_mean)/p_norm
+					end if
+				end do
+			close(201)
+			open(unit=202,file="data_mean/skin_friction.dat")
+				do k = 1, nbct
+					if(thetas_cy(k) .le. PI) then
+						write(202,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), tw_mean_cy(k)/p_norm, tw_fit(k)/p_norm
+					end if
+				end do
+			close(202)
+			
+			open(unit=203,file="data_mean/coefficients.dat")
+				write(203,*) "Drag, C_D:", C_drag_mean
+				write(203,*) "Lift, C_L:", C_lift_mean
+			close(203)
+	
+	end subroutine write_statistics_out
+	
+	subroutine time_averaging_statistics(step)
+		implicit none
+		integer, intent(in) :: step
+		integer :: i,j,k
+		
+		mean_counter = real(step - statsbegin)
+		
+		do i = 1, nx
+			do j = 1, ny
+				rho(i, j) =  sum(f(i, j, :))
+				p(i, j) = rho(i, j)/3.0d0
+				mxyp(i, j) =  sum(f(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
+			end do
+    	end do
+    	
+    	call extrapolate_var_on_cylinder(p, p_cy)
+    	call extrapolate_var_on_cylinder(mxyp, mxyp_cy)
+    	
+		do k = 1,nbct
+			ps_cy(k) = p_cy(idx(k))
+			mxyps_cy(k) = mxyp_cy(idx(k))
+			cths_cyl(k) = cth_cyl(idx(k))
+			sths_cyl(k) = sth_cyl(idx(k))
+			
+			!wall shear stress
+			tw_cy(k) = (-3.0d0 * nu * omega) * mxyps_cy(k)
+!			tw_cy(k) = (-9.0d0 * nu * omega) * ps_cy(k) * mxyps_cy(k)
+			
+			!Mean pressure and mean shear stress calculation
+			p_mean_cy(k) = ((mean_counter*p_mean_cy(k)) + ps_cy(k) )/(mean_counter + 1.0d0)
+			tw_mean_cy(k) = ((mean_counter*tw_mean_cy(k)) + tw_cy(k) )/(mean_counter + 1.0d0)
+		end do
+		
+		call gaussian_smoothing(nbct,thetas_cy,p_mean_cy,p_fit)
+		call gaussian_smoothing(nbct,thetas_cy,tw_mean_cy,tw_fit)
+	
+	end subroutine time_averaging_statistics
 
 	subroutine extrapolate_var_on_cylinder(var_int, int_var_cy)
 		implicit none
@@ -630,7 +616,7 @@ contains
 		
 	end subroutine extrapolate_var_on_cylinder
 	
-	subroutine trapz_sub(n_int,x_int, fx_int, integral)
+	subroutine trapezoidal_sub(n_int,x_int, fx_int, integral)
     implicit none
     integer, intent(in) :: n_int
     real(8), intent(in) :: x_int(n_int), fx_int(n_int)
@@ -643,7 +629,7 @@ contains
         dx_int = x_int(i+1) - x_int(i)
         integral = integral + 0.50d0 * (fx_int(i) + fx_int(i+1)) * dx_int
     end do
-end subroutine trapz_sub
+end subroutine trapezoidal_sub
 	
 	subroutine gaussian_smoothing(n_l,theta_l, p_l, p_smooth_l)
     implicit none
@@ -2475,9 +2461,9 @@ subroutine write_function_plot3d(filename)
     nblocks = nprocs
 	do i = 1, nx
 		do j = 1, ny 
-			var_mxxp(i, j) =  sum(fout(i, j, :) * Hxx_p(i, j, :)) / rho(i, j)
-			var_myyp(i, j) =  sum(fout(i, j, :) * Hyy_p(i, j, :)) / rho(i, j)
-			var_mxyp(i, j) =  sum(fout(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
+			var_mxxp(i, j) =  sum(f(i, j, :) * Hxx_p(i, j, :)) / rho(i, j)
+			var_myyp(i, j) =  sum(f(i, j, :) * Hyy_p(i, j, :)) / rho(i, j)
+			var_mxyp(i, j) =  sum(f(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
 		end do
     end do
     
@@ -2601,6 +2587,7 @@ subroutine write_function_plot3d(filename)
   	allocate(f(1:nx, 1:ny, 0:q-1), f_eq(1:nx, 1:ny, 0:q-1), f_tmp(1:nx, 1:ny, 0:q-1))
   	allocate(fin(1:nx, 1:ny, 0:q-1),fout(1:nx, 1:ny, 0:q-1))
   	allocate(rho(1:nx, 1:ny),p(1:nx, 1:ny), ux(1:nx, 1:ny), uy(1:nx, 1:ny))
+  	allocate(ux_prev(1:nx, 1:ny), uy_prev(1:nx, 1:ny))
   	allocate(mxx(1:nx, 1:ny), myy(1:nx, 1:ny), mxy(1:nx, 1:ny))
   	allocate(mxxp(1:nx, 1:ny), myyp(1:nx, 1:ny), mxyp(1:nx, 1:ny))
   	allocate(er(1:nx, 1:ny),er1(1:nx, 1:ny))
@@ -2638,7 +2625,7 @@ subroutine write_function_plot3d(filename)
 	allocate(idx(1:nbct), thetas_cy(1:nbct), ps_cy(1:nbct), mxyps_cy(1:nbct), tws_cy(1:nbct))
 	allocate(theta_cy(1:nbct), p_cy(1:nbct), mxyp_cy(1:nbct), tw_cy(1:nbct))
 	allocate(p_costheta(1:nbct), p_sintheta(1:nbct), tw_costheta(1:nbct), tw_sintheta(1:nbct))
-	allocate(cth_cyl(1:nbct),sth_cyl(1:nbct))
+	allocate(cth_cyl(1:nbct),sth_cyl(1:nbct), cths_cyl(1:nbct),sths_cyl(1:nbct))
 	
   end subroutine allocate_cylinder_memory
   
@@ -2676,5 +2663,29 @@ subroutine write_function_plot3d(filename)
 
   
   end subroutine create_master_p3d_file
+  
+  subroutine calculate_norm(l2norm)
+    implicit none
+    integer :: i, j 
+    double precision, intent(out) :: l2norm 
+    double precision :: numerator, denominator
+    
+    numerator = 0.0d0
+    denominator = 0.0d0
+
+    do j = 1, ny
+       do i = 1, nx 
+
+          numerator = numerator + sqrt( (ux(i, j) - ux_prev(i, j))**2 + (uy(i, j) - uy_prev(i, j))**2)
+          denominator = denominator + sqrt( ux(i, j)**2 + uy(i, j)**2 )
+          
+       end do
+    end do
+    
+    l2norm = numerator/denominator
+    ux_prev = ux
+    uy_prev = uy 
+    
+  end subroutine calculate_norm
 
 end program lbm_2d
