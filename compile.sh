@@ -28,7 +28,7 @@ echo "Created simulation directory: $SIM_DIR"
 cp "$CODE_DIR/"*.[fF]* "$SIM_DIR/"       # Copy all Fortran source files
 cp "$CODE_DIR/$CODE_FILE" "$SIM_DIR/"    # Copy the specific Fortran code file (code.f90)
 cp "$CODE_DIR/$CODE_FILE2" "$SIM_DIR/"    # Copy the specific Fortran code file (code.f90)
-cp "$CODE_DIR/$EXECUTABLE" "$SIM_DIR/"   # Copy the executable
+#cp "$CODE_DIR/$EXECUTABLE" "$SIM_DIR/"   # Copy the executable
 [ -f "$CODE_DIR/$INPUT_FILE" ] && cp "$CODE_DIR/$INPUT_FILE" "$SIM_DIR/"  # Copy input file if it exists
 
 # === OPEN NEW TERMINAL AND RUN SIMULATION ===

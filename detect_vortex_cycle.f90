@@ -2,27 +2,27 @@ program detect_vortex_cycle
     implicit none
     integer, parameter :: nmax = 900000
     real(8), dimension(nmax) :: time
-     real(8), dimension(nmax) :: signal
+    real(8), dimension(nmax) :: signal
     real(8), dimension(nmax) :: p1_signal,p2_signal,p3_signal,p4_signal
     real(8), dimension(nmax) :: ux1_signal,ux2_signal,ux3_signal,ux4_signal
     real(8), dimension(nmax) :: uy1_signal,uy2_signal,uy3_signal,uy4_signal
     integer :: i, n, peak1, peak2, n_cycle
     real(8) :: period
-	
-	n_cycle = 10
-	
+
+    n_cycle = 10
+
     ! Read the data
     open(unit=10, file='data_probe/uy_probe.dat', status='old')
-    n = 0
-    do
-        n = n + 1
-        read(10, *, end=100) time(n), p1_signal(n), p2_signal(n), p3_signal(n), p4_signal(n)
-    end do
-	100 continue
+        n = 0
+        do
+            n = n + 1
+            read(10, *, end=100) time(n), p1_signal(n), p2_signal(n), p3_signal(n), p4_signal(n)
+        end do
+        100 continue
     close(10)
     n = n - 1
-	
-	!Point-1
+
+    !Point-1
     !-------------------------------------------------------------------------------------------------------
     ! Find first two local maxima (peaks)
     peak1 = -1
@@ -53,8 +53,8 @@ program detect_vortex_cycle
     print *, 'START: t =', nint(time(peak1))
     print *, 'END (10cyl): t =', nint(time(peak1)) + nint(n_cycle*period)
     print *, ' '
-    
-    
+
+
     !Point-2
     !-------------------------------------------------------------------------------------------------------
     ! Find first two local maxima (peaks)
@@ -85,8 +85,8 @@ program detect_vortex_cycle
     print *, 'START: t =', nint(time(peak1))
     print *, 'END (10cyl): t =', nint(time(peak1)) + nint(n_cycle*period)
     print *, ' '
-    
-    
+
+
     !Point-3
     !-------------------------------------------------------------------------------------------------------
     ! Find first two local maxima (peaks)
@@ -118,7 +118,7 @@ program detect_vortex_cycle
     print *, 'START: t =', nint(time(peak1))
     print *, 'END (10cyl): t =', nint(time(peak1)) + nint(n_cycle*period)
     print *, ' '
-    
+
     !Point-4
     !-------------------------------------------------------------------------------------------------------
     ! Find first two local maxima (peaks)
