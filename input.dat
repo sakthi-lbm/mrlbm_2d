@@ -4,7 +4,7 @@
 	lattice_type = 9
 /
 &Cylinder
-	ncy = 40
+	ncy = 20
 	L_front = 8
 	L_back = 26
 	L_top = 9
@@ -22,7 +22,7 @@
 	iplot = 1000
 	max_iter = 90000000
 	isave = 10000
-	irestart = 1
+	irestart = 0
 	statsbegin =  450001
 	statsend = 473611
 	iplotstats = 1000
@@ -39,3 +39,4 @@
 	vel_interp = .true.
 	mom_interp = .true.
 	rotated_coordinate = .true.
+    mom_collision = .false.
