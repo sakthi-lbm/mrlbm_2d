@@ -1929,6 +1929,125 @@ contains
 
 
     end subroutine numerical_boundary_cases_rotation
+    
+    subroutine numerical_boundary_cases_rotation_rhoeq(xi,yj,label,uxp,uyp)
+        implicit none
+        integer,intent(in) :: xi,yj,label
+        real(8),intent(in) :: uxp,uyp
+        integer,dimension(0:q-1) :: Is,Os
+        real(8),dimension(0:q-1) :: A_i,E_i, B11_i, B22_i, B12_i
+        real(8),dimension(1:3,1:3) :: A_coeff
+        real(8),dimension(1:3) :: b_coeff
+        real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
+        real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
+        real(8) :: A_prime, E_prime, G_prime, B11_prime, B22_prime, B12_prime
+        real(8) :: D_xx_prime, D_yy_prime, D_xy_prime, J11_prime, J22_prime, J12_prime
+        real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
+        real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
+        real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star, &
+                    & J11_xy_star, J22_xy_star, J12_xy_star
+        real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
+        real(8) :: R_xx, R_yy, R_xy, denominator
+        integer :: nvar_sys = 3
+
+
+        Is(0:q-1) = Incs_b(label,0:q-1)
+        Os(0:q-1) = Outs_b(label,0:q-1)
+
+        do k = 0, q-1
+            A_i(k) = w(k)*( 1.0d0 + 3.0d0*uxp*cx_p(xi, yj, k) + 3.0d0*uyp*cy_p(xi, yj, k) )
+            E_i(k) = w(k)*( 1.0d0 + 3.0d0*uxp*cx_p(xi, yj, k) + 3.0d0*uyp*cy_p(xi, yj, k) &
+                & + 4.50d0*(uxp**2)*Hxx_p(xi, yj, k) + 4.50d0*(uyp**2)*Hyy_p(xi, yj, k) + 9.0d0*(uxp*uyp)*Hxy_p(xi, yj, k) )
+            B11_i(k) = 4.50d0*w(k)*Hxx_p(xi, yj, k)
+            B22_i(k) = 4.50d0*w(k)*Hyy_p(xi, yj, k)
+            B12_i(k) = 4.50d0*w(k)*Hxy_p(xi, yj, k)
+        end do
+
+        !gamma,delta = 1,2,3
+        !alpha,beta = x,y,z
+
+        rhoI_b = 0.0d0; mxxI_b = 0.0d0; myyI_b = 0.0d0; mxyI_b = 0.0d0
+        E_prime = 0.0d0
+
+        B11_prime = 0.0d0; B22_prime = 0.0d0; B12_prime = 0.0d0
+        D_xx_prime = 0.0d0; D_yy_prime = 0.0d0; D_xy_prime = 0.0d0 
+        F11_xx_prime = 0.0d0; F12_xx_prime = 0.0d0; F22_xx_prime = 0.0d0
+        F11_yy_prime = 0.0d0; F12_yy_prime = 0.0d0; F22_yy_prime = 0.0d0
+        F11_xy_prime = 0.0d0; F12_xy_prime = 0.0d0; F22_xy_prime = 0.0d0
+
+        do k = 0, q-1
+            if(Is(k)==1) then
+                rhoI_b = rhoI_b + f(xi, yj, k)
+                mxxI_b = mxxI_b + f(xi, yj, k)*Hxx_p(xi, yj, k)
+                myyI_b = myyI_b + f(xi, yj, k)*Hyy_p(xi, yj, k)
+                mxyI_b = mxyI_b + f(xi, yj, k)*Hxy_p(xi, yj, k)
+
+                E_prime = E_prime + E_i(k)
+                
+                D_xx_prime = D_xx_prime + A_i(k)*Hxx_p(xi, yj, k)
+                D_yy_prime = D_yy_prime + A_i(k)*Hyy_p(xi, yj, k)
+                D_xy_prime = D_xy_prime + A_i(k)*Hxy_p(xi, yj, k)
+
+                F11_xx_prime = F11_xx_prime + B11_i(k)*Hxx_p(xi, yj, k)
+                F22_xx_prime = F22_xx_prime + B22_i(k)*Hxx_p(xi, yj, k)
+                F12_xx_prime = F12_xx_prime + B12_i(k)*Hxx_p(xi, yj, k)
+
+                F11_yy_prime = F11_yy_prime + B11_i(k)*Hyy_p(xi, yj, k)
+                F22_yy_prime = F22_yy_prime + B22_i(k)*Hyy_p(xi, yj, k)
+                F12_yy_prime = F12_yy_prime + B12_i(k)*Hyy_p(xi, yj, k)
+
+                F11_xy_prime = F11_xy_prime + B11_i(k)*Hxy_p(xi, yj, k)
+                F22_xy_prime = F22_xy_prime + B22_i(k)*Hxy_p(xi, yj, k)
+                F12_xy_prime = F12_xy_prime + B12_i(k)*Hxy_p(xi, yj, k)
+
+            end if
+        end do
+
+        mxxI_b = mxxI_b/rhoI_b
+        myyI_b = myyI_b/rhoI_b
+        mxyI_b = mxyI_b/rhoI_b
+
+        L_11_xx = F11_xx_prime
+        L_11_yy = F11_yy_prime
+        L_11_xy = F11_xy_prime
+
+        L_22_xx = F22_xx_prime
+        L_22_yy = F22_yy_prime
+        L_22_xy = F22_xy_prime
+
+        L_12_xx = 2.0d0 * F12_xx_prime
+        L_12_yy = 2.0d0 * F12_yy_prime
+        L_12_xy = 2.0d0 * F12_xy_prime
+
+        R_xx = E_prime * mxxI_b - D_xx_prime
+        R_yy = E_prime * myyI_b - D_yy_prime
+        R_xy = E_prime * mxyI_b - D_xy_prime
+
+        Mxx_prime_b = mxxp(xi, yj)
+        Myy_prime_b = myyp(xi, yj)
+        Mxy_prime_b =  (R_xy - Mxx_prime_b * L_11_xy - Myy_prime_b * L_22_xy) / L_12_xy
+
+        rho_prime_b = rhoI_b/E_prime
+        
+        if(mom_collision) then
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b * (cth_glb(xi,yj)**2) + Myy_prime_b *(sth_glb(xi,yj)**2) - Mxy_prime_b * s2th_glb(xi,yj)
+            myy(xi, yj) = Mxx_prime_b * (sth_glb(xi,yj)**2) + Myy_prime_b *(cth_glb(xi,yj)**2) + Mxy_prime_b * s2th_glb(xi,yj)
+            mxy(xi, yj) = (Mxx_prime_b - Myy_prime_b) * 0.50d0 * s2th_glb(xi,yj) + Mxy_prime_b * c2th_glb(xi,yj)
+        end if
+
+        if(pop_collision) then
+            do k = 0, q-1
+                f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*uxp*cx_p(xi, yj, k)) &
+                            & + (3.0d0*uyp*cy_p(xi, yj, k))  &
+                            & + (4.50d0*Mxx_prime_b*Hxx_p(xi, yj, k)) &
+                            & + (4.50d0*Myy_prime_b*Hyy_p(xi, yj, k)) &
+                            & + (9.0d0*Mxy_prime_b*Hxy_p(xi, yj, k)) )
+            end do
+        end if
+
+
+    end subroutine numerical_boundary_cases_rotation_rhoeq
 
     subroutine solve_system(nvar, A_sys,b_sys,x_11,x_22,x_12)
         implicit none
