@@ -342,11 +342,11 @@ program lbm_2d
     !Collision - velocity space
     !----------------------------------------------------------------------------------------------------	
     if(pop_collision) then
-        ! do i = 1, nx
-            ! do j = 1, ny
-                ! rho(i, j) = sum(f(i, j, :))
-            ! end do
-        ! end do
+        do i = 1, nx
+            do j = 1, ny
+                rho(i, j) = sum(f(i, j, :))
+            end do
+        end do
 
         !$omp parallel do collapse(2) private(cu, k) shared(e, ux, uy, rho, w, f_eq, fout, f, omega)
         do i = 1, nx
