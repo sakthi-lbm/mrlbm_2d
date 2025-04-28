@@ -288,8 +288,8 @@ program lbm_2d
             !!Rotated coordinate system
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            !call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            !call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
             !call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
