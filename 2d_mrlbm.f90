@@ -339,39 +339,6 @@ program lbm_2d
     end if
 
     !=============================================================================================================================
-    !Collision - velocity space
-    !----------------------------------------------------------------------------------------------------	
-    if(pop_collision) then
-        do i = 1, nx
-            do j = 1, ny
-                rho(i, j) = sum(f(i, j, :))
-            end do
-        end do
-
-        !$omp parallel do collapse(2) private(cu, k) shared(e, ux, uy, rho, w, f_eq, fout, f, omega)
-        do i = 1, nx
-             do j = 1, ny
-                 do k = 0, q-1
-                    cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
-                    f_eq(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) + (4.50d0*(cu*cu)) - &
-                                    & 1.50d0*( ux(i, j)*ux(i, j) + uy(i, j)*uy(i, j)) )
-                    fout(i, j, k) = f(i, j, k) - omega * (f(i, j, k) - f_eq(i, j, k))
-                end do
-            end do
-        end do
-        !$omp end parallel do
-
-        !$omp parallel do collapse(2) shared(rho, mxx,myy,mxy, Hxx,Hyy,Hxy, fout)
-        do i = 1, nx
-            do j = 1, ny 
-                mxx(i, j) =  sum(fout(i, j, :) * Hxx(:)) / rho(i, j)
-                myy(i, j) =  sum(fout(i, j, :) * Hyy(:)) / rho(i, j)
-                mxy(i, j) =  sum(fout(i, j, :) * Hxy(:)) / rho(i, j)
-            end do
-        end do
-        !$omp end parallel do
-    end if
-
 
     !----------------------------------------------------------------------------------------------------	
     !Collision - Moments space
