@@ -23,10 +23,10 @@
 	max_iter = 90000000
 	isave = 10000
 	irestart = 1
-	statsbegin =  160001
-	statsend = 187221
+	statsbegin =  260001
+	statsend = 271931
 	iplotstats = 1000
-	cycle_period = 2361
+	cycle_period = 1193
 
 /
 &LogicalControls
@@ -39,4 +39,3 @@
 	vel_interp = .true.
 	mom_interp = .true.
 	rotated_coordinate = .true.
-    mom_collision = .false.

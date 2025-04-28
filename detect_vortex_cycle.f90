@@ -27,7 +27,7 @@ program detect_vortex_cycle
     ! Find first two local maxima (peaks)
     peak1 = -1
     peak2 = -1
-    signal = p2_signal
+    signal = p1_signal
     do i = 2, n-1
         if (signal(i) > signal(i-1) .and. signal(i) > signal(i+1)) then
             if (peak1 == -1) then

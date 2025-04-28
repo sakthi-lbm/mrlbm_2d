@@ -69,10 +69,7 @@ program lbm_2d
     character (len=100) :: bc_type
     logical :: x_periodic, y_periodic, channel_with_cylinder,incomp,channel_with_square
     logical :: vel_interp, mom_interp, rotated_coordinate, post_process
-    logical :: pop_collision, mom_collision
     logical, parameter :: verbose = .true.
-
-    pop_collision = .NOT. mom_collision
 
     !$ call omp_set_num_threads(num_threads)
 
@@ -291,8 +288,8 @@ program lbm_2d
             !!Rotated coordinate system
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            !call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            !call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
             !call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
@@ -339,22 +336,18 @@ program lbm_2d
     end if
 
     !=============================================================================================================================
-
     !----------------------------------------------------------------------------------------------------	
     !Collision - Moments space
     !----------------------------------------------------------------------------------------------------	
-    if(mom_collision)then
-        !$omp parallel do collapse(2) shared(rho, mxx,myy,mxy, Hxx,Hyy,Hxy, fout)
-        do i = 1, nx
-            do j = 1, ny 
-                mxx(i, j) =  (1.0d0 - omega)*mxx(i, j) + omega*ux(i, j)*ux(i, j)
-                myy(i, j) =  (1.0d0 - omega)*myy(i, j) + omega*uy(i, j)*uy(i, j)
-                mxy(i, j) =  (1.0d0 - omega)*mxy(i, j) + omega*ux(i, j)*uy(i, j)
-            end do
+    !$omp parallel do collapse(2) shared(rho, mxx,myy,mxy, Hxx,Hyy,Hxy, fout)
+    do i = 1, nx
+        do j = 1, ny 
+            mxx(i, j) =  (1.0d0 - omega)*mxx(i, j) + omega*ux(i, j)*ux(i, j)
+            myy(i, j) =  (1.0d0 - omega)*myy(i, j) + omega*uy(i, j)*uy(i, j)
+            mxy(i, j) =  (1.0d0 - omega)*mxy(i, j) + omega*ux(i, j)*uy(i, j)
         end do
-        !$omp end parallel do
-    end if
-
+    end do
+    !$omp end parallel do
 
     !----------------------------------------------------------------------------------------------------	
     !Kinetic Projection / Regularization (using modified moments)
@@ -1246,23 +1239,10 @@ contains
             Myy_prime_b = 6.0d0*rhoI_b*myyI_b/(5.0d0*rho_prime_b)
             Mxy_prime_b = (6.0d0*rhoI_b*mxyI_b - rho_prime_b*uy(xi,yj))/(3.0d0*rho_prime_b)
 
-            if(mom_collision)then
-                rho(xi, yj) = rho_prime_b
-                mxx(xi, yj) = Mxx_prime_b
-                myy(xi, yj) = Myy_prime_b
-                mxy(xi, yj) = Mxy_prime_b
-            end if
-
-            if(pop_collision)then
-                do k = 0, q-1
-                    f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*ux(xi,yj)*e(k, 1)) &
-                                & + (3.0d0*uy(xi,yj)*e(k, 2))  &
-                                & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                                & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                                & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-                end do
-            end if
-
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b
+            myy(xi, yj) = Myy_prime_b
+            mxy(xi, yj) = Mxy_prime_b
 
         CASE ("inlet_bc")
             rhoI_b = 0.0d0
@@ -1290,22 +1270,10 @@ contains
             Myy_prime_b = 6.0d0*rhoI_b*myyI_b/(5.0d0*rho_prime_b)
             Mxy_prime_b = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
 
-            if(mom_collision)then
-                rho(xi, yj) = rho_prime_b
-                mxx(xi, yj) = Mxx_prime_b
-                myy(xi, yj) = Myy_prime_b
-                mxy(xi, yj) = Mxy_prime_b
-            end if
-
-            if(pop_collision)then
-                do k = 0, q-1
-                    f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*ux(xi,yj)*e(k, 1)) &
-                                & + (3.0d0*uy(xi,yj)*e(k, 2))  &
-                                & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                                & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                                & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-                end do
-            end if
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b
+            myy(xi, yj) = Myy_prime_b
+            mxy(xi, yj) = Mxy_prime_b
 
         CASE ("topwall_bc")
             rhoI_b = 0.0d0
@@ -1333,22 +1301,10 @@ contains
             Myy_prime_b = (rho_prime_b + 9.0d0*rhoI_b*myyI_b)/(6.0d0*rho_prime_b)
             Mxy_prime_b = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
 
-            if(mom_collision)then
-                rho(xi, yj) = rho_prime_b
-                mxx(xi, yj) = Mxx_prime_b
-                myy(xi, yj) = Myy_prime_b
-                mxy(xi, yj) = Mxy_prime_b
-            end if
-
-            if(pop_collision)then
-                do k = 0, q-1
-                    f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*ux(xi,yj)*e(k, 1)) &
-                                & + (3.0d0*uy(xi,yj)*e(k, 2))  &
-                                & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                                & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                                & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-                end do
-            end if
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b
+            myy(xi, yj) = Myy_prime_b
+            mxy(xi, yj) = Mxy_prime_b
 
         CASE ("bottomwall_bc")
             rhoI_b = 0.0d0
@@ -1376,22 +1332,10 @@ contains
             Myy_prime_b = (rho_prime_b + 9.0d0*rhoI_b*myyI_b)/(6.0d0*rho_prime_b)
             Mxy_prime_b = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
 
-            if(mom_collision)then
-                rho(xi, yj) = rho_prime_b
-                mxx(xi, yj) = Mxx_prime_b
-                myy(xi, yj) = Myy_prime_b
-                mxy(xi, yj) = Mxy_prime_b
-            end if
-
-            if(pop_collision)then
-                do k = 0, q-1
-                    f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*ux(xi,yj)*e(k, 1)) &
-                                & + (3.0d0*uy(xi,yj)*e(k, 2))  &
-                                & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                                & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                                & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-                end do
-            end if
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b
+            myy(xi, yj) = Myy_prime_b
+            mxy(xi, yj) = Mxy_prime_b
 
         CASE DEFAULT
             print*,"Not a valid boundary type!!!!!!!"
@@ -1445,23 +1389,11 @@ contains
             Myy_prime_b = uy(xi,yj)**2
             Mxy_prime_b = (6.0d0*rhoI_b*mxyI_b - rho_prime_b*uy(xi,yj))/(3.0d0*rho_prime_b)
 
-            if(mom_collision)then
-                rho(xi, yj) = rho_prime_b
-                mxx(xi, yj) = Mxx_prime_b
-                myy(xi, yj) = Myy_prime_b
-                mxy(xi, yj) = Mxy_prime_b
-            end if
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b
+            myy(xi, yj) = Myy_prime_b
+            mxy(xi, yj) = Mxy_prime_b
 
-            if(pop_collision)then
-                do k = 0, q-1
-                    f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*ux(xi,yj)*e(k, 1)) &
-                                & + (3.0d0*uy(xi,yj)*e(k, 2))  &
-                                & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                                & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                                & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-                end do
-            end if
-        
         CASE ("inlet_bc")
             rhoI_b = 0.0d0
             mxxI_b = 0.0d0
@@ -1488,23 +1420,11 @@ contains
             Myy_prime_b = 0.0d0
             Mxy_prime_b = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
 
-            if(mom_collision)then
-                rho(xi, yj) = rho_prime_b
-                mxx(xi, yj) = Mxx_prime_b
-                myy(xi, yj) = Myy_prime_b
-                mxy(xi, yj) = Mxy_prime_b
-            end if
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b
+            myy(xi, yj) = Myy_prime_b
+            mxy(xi, yj) = Mxy_prime_b
             
-            if(pop_collision)then
-                do k = 0, q-1
-                    f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*ux(xi,yj)*e(k, 1)) &
-                                & + (3.0d0*uy(xi,yj)*e(k, 2))  &
-                                & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                                & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                                & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-                end do
-            end if
-
         CASE ("topwall_bc")
             rhoI_b = 0.0d0
             mxxI_b = 0.0d0
@@ -1531,22 +1451,10 @@ contains
             Myy_prime_b = 0.0d0
             Mxy_prime_b = 5.0d0*mxyI_b/3.0d0
 
-            if(mom_collision)then
-                rho(xi, yj) = rho_prime_b
-                mxx(xi, yj) = Mxx_prime_b
-                myy(xi, yj) = Myy_prime_b
-                mxy(xi, yj) = Mxy_prime_b
-            end if
-
-            if(pop_collision)then
-                do k = 0, q-1
-                    f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*ux(xi,yj)*e(k, 1)) &
-                                & + (3.0d0*uy(xi,yj)*e(k, 2))  &
-                                & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                                & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                                & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-                end do
-            end if
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b
+            myy(xi, yj) = Myy_prime_b
+            mxy(xi, yj) = Mxy_prime_b
 
         CASE ("bottomwall_bc")
             rhoI_b = 0.0d0
@@ -1574,22 +1482,10 @@ contains
             Myy_prime_b = 0.0d0
             Mxy_prime_b = 5.0d0*mxyI_b/3.0d0
 
-            if(mom_collision)then
-                rho(xi, yj) = rho_prime_b
-                mxx(xi, yj) = Mxx_prime_b
-                myy(xi, yj) = Myy_prime_b
-                mxy(xi, yj) = Mxy_prime_b
-            end if
-
-            if(pop_collision)then
-                do k = 0, q-1
-                    f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*ux(xi,yj)*e(k, 1)) &
-                                & + (3.0d0*uy(xi,yj)*e(k, 2))  &
-                                & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                                & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                                & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-                end do
-            end if
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b
+            myy(xi, yj) = Myy_prime_b
+            mxy(xi, yj) = Mxy_prime_b
 
         CASE DEFAULT
             print*,"Not a valid boundary type!!!!!!!"
@@ -1730,24 +1626,11 @@ contains
                         & + 2.0d0*Mxy_prime_b*B12_prime) + omega*E_prime
         rho_prime_b = rhoI_b/denominator
 
-        if(mom_collision)then
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
-        end if
+        rho(xi, yj) = rho_prime_b
+        mxx(xi, yj) = Mxx_prime_b
+        myy(xi, yj) = Myy_prime_b
+        mxy(xi, yj) = Mxy_prime_b
         
-        if(pop_collision)then
-            do k = 0, q-1
-                f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*uxp*e(k, 1)) &
-                            & + (3.0d0*uyp*e(k, 2))  &
-                            & + (4.50d0*Mxx_prime_b*Hxx(k)) &
-                            & + (4.50d0*Myy_prime_b*Hyy(k)) &
-                            & + (9.0d0*Mxy_prime_b*Hxy(k)) )
-            end do
-        end if
-
-
     end subroutine numerical_boundary_cases
 
     subroutine numerical_boundary_cases_rotation(xi,yj,label,uxp,uyp)
@@ -1835,8 +1718,6 @@ contains
         myyI_b = myyI_b/rhoI_b
         mxyI_b = mxyI_b/rhoI_b
 
-
-
         G_prime = (1.0d0 - omega)*A_prime + omega*E_prime
 
         J11_prime = (1.0d0 - omega)*B11_prime
@@ -1879,23 +1760,10 @@ contains
             & + 2.0d0*Mxy_prime_b*B12_prime) + omega*E_prime
         rho_prime_b = rhoI_b/denominator
         
-        if(mom_collision) then
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b * (cth_glb(xi,yj)**2) + Myy_prime_b *(sth_glb(xi,yj)**2) - Mxy_prime_b * s2th_glb(xi,yj)
-            myy(xi, yj) = Mxx_prime_b * (sth_glb(xi,yj)**2) + Myy_prime_b *(cth_glb(xi,yj)**2) + Mxy_prime_b * s2th_glb(xi,yj)
-            mxy(xi, yj) = (Mxx_prime_b - Myy_prime_b) * 0.50d0 * s2th_glb(xi,yj) + Mxy_prime_b * c2th_glb(xi,yj)
-        end if
-
-        if(pop_collision) then
-            do k = 0, q-1
-                f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*uxp*cx_p(xi, yj, k)) &
-                            & + (3.0d0*uyp*cy_p(xi, yj, k))  &
-                            & + (4.50d0*Mxx_prime_b*Hxx_p(xi, yj, k)) &
-                            & + (4.50d0*Myy_prime_b*Hyy_p(xi, yj, k)) &
-                            & + (9.0d0*Mxy_prime_b*Hxy_p(xi, yj, k)) )
-            end do
-        end if
-
+        rho(xi, yj) = rho_prime_b
+        mxx(xi, yj) = Mxx_prime_b * (cth_glb(xi,yj)**2) + Myy_prime_b *(sth_glb(xi,yj)**2) - Mxy_prime_b * s2th_glb(xi,yj)
+        myy(xi, yj) = Mxx_prime_b * (sth_glb(xi,yj)**2) + Myy_prime_b *(cth_glb(xi,yj)**2) + Mxy_prime_b * s2th_glb(xi,yj)
+        mxy(xi, yj) = (Mxx_prime_b - Myy_prime_b) * 0.50d0 * s2th_glb(xi,yj) + Mxy_prime_b * c2th_glb(xi,yj)
 
     end subroutine numerical_boundary_cases_rotation
     
@@ -2002,23 +1870,10 @@ contains
         denominator = A_prime + (Mxx_prime_b*B11_prime + Myy_prime_b*B22_prime  + 2.0d0*Mxy_prime_b*B12_prime)
         rho_prime_b = rhoI_b/denominator
         
-        if(mom_collision) then
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b * (cth_glb(xi,yj)**2) + Myy_prime_b *(sth_glb(xi,yj)**2) - Mxy_prime_b * s2th_glb(xi,yj)
-            myy(xi, yj) = Mxx_prime_b * (sth_glb(xi,yj)**2) + Myy_prime_b *(cth_glb(xi,yj)**2) + Mxy_prime_b * s2th_glb(xi,yj)
-            mxy(xi, yj) = (Mxx_prime_b - Myy_prime_b) * 0.50d0 * s2th_glb(xi,yj) + Mxy_prime_b * c2th_glb(xi,yj)
-        end if
-
-        if(pop_collision) then
-            do k = 0, q-1
-                f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*uxp*cx_p(xi, yj, k)) &
-                            & + (3.0d0*uyp*cy_p(xi, yj, k))  &
-                            & + (4.50d0*Mxx_prime_b*Hxx_p(xi, yj, k)) &
-                            & + (4.50d0*Myy_prime_b*Hyy_p(xi, yj, k)) &
-                            & + (9.0d0*Mxy_prime_b*Hxy_p(xi, yj, k)) )
-            end do
-        end if
-
+        rho(xi, yj) = rho_prime_b
+        mxx(xi, yj) = Mxx_prime_b * (cth_glb(xi,yj)**2) + Myy_prime_b *(sth_glb(xi,yj)**2) - Mxy_prime_b * s2th_glb(xi,yj)
+        myy(xi, yj) = Mxx_prime_b * (sth_glb(xi,yj)**2) + Myy_prime_b *(cth_glb(xi,yj)**2) + Mxy_prime_b * s2th_glb(xi,yj)
+        mxy(xi, yj) = (Mxx_prime_b - Myy_prime_b) * 0.50d0 * s2th_glb(xi,yj) + Mxy_prime_b * c2th_glb(xi,yj)
 
     end subroutine numerical_boundary_cases_rotation_weak
     
@@ -2121,23 +1976,10 @@ contains
 
         rho_prime_b = rhoI_b/E_prime
         
-        if(mom_collision) then
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b * (cth_glb(xi,yj)**2) + Myy_prime_b *(sth_glb(xi,yj)**2) - Mxy_prime_b * s2th_glb(xi,yj)
-            myy(xi, yj) = Mxx_prime_b * (sth_glb(xi,yj)**2) + Myy_prime_b *(cth_glb(xi,yj)**2) + Mxy_prime_b * s2th_glb(xi,yj)
-            mxy(xi, yj) = (Mxx_prime_b - Myy_prime_b) * 0.50d0 * s2th_glb(xi,yj) + Mxy_prime_b * c2th_glb(xi,yj)
-        end if
-
-        if(pop_collision) then
-            do k = 0, q-1
-                f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*uxp*cx_p(xi, yj, k)) &
-                            & + (3.0d0*uyp*cy_p(xi, yj, k))  &
-                            & + (4.50d0*Mxx_prime_b*Hxx_p(xi, yj, k)) &
-                            & + (4.50d0*Myy_prime_b*Hyy_p(xi, yj, k)) &
-                            & + (9.0d0*Mxy_prime_b*Hxy_p(xi, yj, k)) )
-            end do
-        end if
-
+        rho(xi, yj) = rho_prime_b
+        mxx(xi, yj) = Mxx_prime_b * (cth_glb(xi,yj)**2) + Myy_prime_b *(sth_glb(xi,yj)**2) - Mxy_prime_b * s2th_glb(xi,yj)
+        myy(xi, yj) = Mxx_prime_b * (sth_glb(xi,yj)**2) + Myy_prime_b *(cth_glb(xi,yj)**2) + Mxy_prime_b * s2th_glb(xi,yj)
+        mxy(xi, yj) = (Mxx_prime_b - Myy_prime_b) * 0.50d0 * s2th_glb(xi,yj) + Mxy_prime_b * c2th_glb(xi,yj)
 
     end subroutine numerical_boundary_cases_rotation_rhoeq
 
@@ -2363,7 +2205,7 @@ contains
         namelist/Parallel/nprocsx,nprocsy
         namelist/Controls/uo,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats, cycle_period
         namelist/LogicalControls/post_process, x_periodic,y_periodic,channel_with_cylinder,channel_with_square, &
-            & incomp,vel_interp, mom_interp, rotated_coordinate, mom_collision
+            & incomp,vel_interp, mom_interp, rotated_coordinate
 
         300 format("Error while reading input.dat file...")
         150 if (iread_error .ne. 0) then 

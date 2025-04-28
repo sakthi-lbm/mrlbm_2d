@@ -7,6 +7,7 @@ INPUT_FILE="input.dat"              # If applicable, change or remove this
 CODE_FILE="2d_mrlbm.f90"                # Your Fortran code file
 CODE_FILE2="detect_vortex_cycle.f90"                # Your Fortran code file
 BASE_DIR="$PWD/simulations"         # Base directory for all simulations
+RE_DIR="restart"
 #BASE_DIR="$PWD/simulations"         # Base directory for all simulations
 
 # === GET SIMULATION NAME ===
@@ -29,6 +30,7 @@ cp "$CODE_DIR/"*.[fF]* "$SIM_DIR/"       # Copy all Fortran source files
 cp "$CODE_DIR/$CODE_FILE" "$SIM_DIR/"    # Copy the specific Fortran code file (code.f90)
 cp "$CODE_DIR/$CODE_FILE2" "$SIM_DIR/"    # Copy the specific Fortran code file (code.f90)
 #cp "$CODE_DIR/$EXECUTABLE" "$SIM_DIR/"   # Copy the executable
+cp -a "$RE_DIR" "$SIM_DIR/"
 [ -f "$CODE_DIR/$INPUT_FILE" ] && cp "$CODE_DIR/$INPUT_FILE" "$SIM_DIR/"  # Copy input file if it exists
 
 # === OPEN NEW TERMINAL AND RUN SIMULATION ===
