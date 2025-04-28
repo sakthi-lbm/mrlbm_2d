@@ -6,7 +6,7 @@
 &Cylinder
 	ncy = 20
 	L_front = 8
-	L_back = 26
+	L_back = 35
 	L_top = 9
 	L_bot = 9
 /
@@ -22,9 +22,9 @@
 	iplot = 1000
 	max_iter = 90000000
 	isave = 10000
-	irestart = 0
-	statsbegin =  450001
-	statsend = 473611
+	irestart = 1
+	statsbegin =  160001
+	statsend = 187221
 	iplotstats = 1000
 	cycle_period = 2361
 

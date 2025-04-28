@@ -2,7 +2,7 @@ program lbm_2d
     implicit none
     ! Parameters
     real(8), parameter :: PI = 4.0d0*atan(1.0d0)
-    integer :: num_threads=16
+    integer :: num_threads=8
     integer :: nprocsx, nprocsy
     integer :: iplot, max_iter, isave, irestart, statsbegin,statsend, iplotstats, cycle_period
     integer :: restart_step = 1
@@ -11,7 +11,7 @@ program lbm_2d
     integer, allocatable,dimension(:,:) :: isfluid, issolid,isbound
     real(8), allocatable,dimension(:,:) :: x,y,xvar,yvar
     integer :: nbct
-    real*8, allocatable,dimension(:,:) :: boundary
+    real(8), allocatable,dimension(:,:) :: boundary
     integer, allocatable,dimension(:) :: bou_i,bou_j,label_bc,idx
     integer :: nx,ny
     integer :: ncy, L_front,L_back,L_top,L_bot
@@ -292,6 +292,8 @@ program lbm_2d
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
             call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            !call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            !call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
     end if
@@ -340,11 +342,11 @@ program lbm_2d
     !Collision - velocity space
     !----------------------------------------------------------------------------------------------------	
     if(pop_collision) then
-        do i = 1, nx
-            do j = 1, ny
-                rho(i, j) = sum(f(i, j, :))
-            end do
-        end do
+        ! do i = 1, nx
+            ! do j = 1, ny
+                ! rho(i, j) = sum(f(i, j, :))
+            ! end do
+        ! end do
 
         !$omp parallel do collapse(2) private(cu, k) shared(e, ux, uy, rho, w, f_eq, fout, f, omega)
         do i = 1, nx
@@ -1929,6 +1931,129 @@ contains
 
 
     end subroutine numerical_boundary_cases_rotation
+    
+    subroutine numerical_boundary_cases_rotation_weak(xi,yj,label,uxp,uyp)
+        implicit none
+        integer,intent(in) :: xi,yj,label
+        real(8),intent(in) :: uxp,uyp
+        integer,dimension(0:q-1) :: Is,Os
+        real(8),dimension(0:q-1) :: A_i,E_i, B11_i, B22_i, B12_i
+        real(8),dimension(1:3,1:3) :: A_coeff
+        real(8),dimension(1:3) :: b_coeff
+        real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
+        real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
+        real(8) :: A_prime, E_prime, G_prime, B11_prime, B22_prime, B12_prime
+        real(8) :: D_xx_prime, D_yy_prime, D_xy_prime, J11_prime, J22_prime, J12_prime
+        real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
+        real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
+        real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star, &
+                    & J11_xy_star, J22_xy_star, J12_xy_star
+        real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
+        real(8) :: R_xx, R_yy, R_xy, denominator
+        integer :: nvar_sys = 3
+
+
+        Is(0:q-1) = Incs_b(label,0:q-1)
+        Os(0:q-1) = Outs_b(label,0:q-1)
+
+        do k = 0, q-1
+            A_i(k) = w(k)*( 1.0d0 + 3.0d0*uxp*cx_p(xi, yj, k) + 3.0d0*uyp*cy_p(xi, yj, k) )
+            B11_i(k) = 4.50d0*w(k)*Hxx_p(xi, yj, k)
+            B22_i(k) = 4.50d0*w(k)*Hyy_p(xi, yj, k)
+            B12_i(k) = 4.50d0*w(k)*Hxy_p(xi, yj, k)
+        end do
+
+        !gamma,delta = 1,2,3
+        !alpha,beta = x,y,z
+
+        rhoI_b = 0.0d0; mxxI_b = 0.0d0; myyI_b = 0.0d0; mxyI_b = 0.0d0
+        A_prime = 0.0d0; E_prime = 0.0d0
+
+        B11_prime = 0.0d0; B22_prime = 0.0d0; B12_prime = 0.0d0
+        D_xx_prime = 0.0d0; D_yy_prime = 0.0d0; D_xy_prime = 0.0d0 
+        F11_xx_prime = 0.0d0; F12_xx_prime = 0.0d0; F22_xx_prime = 0.0d0
+        F11_yy_prime = 0.0d0; F12_yy_prime = 0.0d0; F22_yy_prime = 0.0d0
+        F11_xy_prime = 0.0d0; F12_xy_prime = 0.0d0; F22_xy_prime = 0.0d0
+
+        do k = 0, q-1
+
+            if(Is(k)==1) then
+                rhoI_b = rhoI_b + f(xi, yj, k)
+                mxxI_b = mxxI_b + f(xi, yj, k)*Hxx_p(xi, yj, k)
+                myyI_b = myyI_b + f(xi, yj, k)*Hyy_p(xi, yj, k)
+                mxyI_b = mxyI_b + f(xi, yj, k)*Hxy_p(xi, yj, k)
+                
+                A_prime = A_prime + A_i(k)
+
+                B11_prime = B11_prime + B11_i(k)
+                B22_prime = B22_prime + B22_i(k)
+                B12_prime = B12_prime + B12_i(k)
+
+                D_xx_prime = D_xx_prime + A_i(k)*Hxx_p(xi, yj, k)
+                D_yy_prime = D_yy_prime + A_i(k)*Hyy_p(xi, yj, k)
+                D_xy_prime = D_xy_prime + A_i(k)*Hxy_p(xi, yj, k)
+
+                F11_xx_prime = F11_xx_prime + B11_i(k)*Hxx_p(xi, yj, k)
+                F22_xx_prime = F22_xx_prime + B22_i(k)*Hxx_p(xi, yj, k)
+                F12_xx_prime = F12_xx_prime + B12_i(k)*Hxx_p(xi, yj, k)
+
+                F11_yy_prime = F11_yy_prime + B11_i(k)*Hyy_p(xi, yj, k)
+                F22_yy_prime = F22_yy_prime + B22_i(k)*Hyy_p(xi, yj, k)
+                F12_yy_prime = F12_yy_prime + B12_i(k)*Hyy_p(xi, yj, k)
+
+                F11_xy_prime = F11_xy_prime + B11_i(k)*Hxy_p(xi, yj, k)
+                F22_xy_prime = F22_xy_prime + B22_i(k)*Hxy_p(xi, yj, k)
+                F12_xy_prime = F12_xy_prime + B12_i(k)*Hxy_p(xi, yj, k)
+
+            end if
+        end do
+
+        mxxI_b = mxxI_b/rhoI_b
+        myyI_b = myyI_b/rhoI_b
+        mxyI_b = mxyI_b/rhoI_b
+
+        L_11_xx = B11_prime * mxxI_b - F11_xx_prime
+        L_11_yy = B11_prime * myyI_b - F11_yy_prime
+        L_11_xy = B11_prime * mxyI_b - F11_xy_prime
+
+        L_22_xx = B22_prime * mxxI_b- F22_xx_prime
+        L_22_yy = B22_prime * myyI_b- F22_yy_prime
+        L_22_xy = B22_prime * mxyI_b- F22_xy_prime
+
+        L_12_xx = 2.0d0 * (B12_prime * mxxI_b- F12_xx_prime)
+        L_12_yy = 2.0d0 * (B12_prime * myyI_b- F12_yy_prime)
+        L_12_xy = 2.0d0 * (B12_prime * mxyI_b- F12_xy_prime)
+
+        R_xx = D_xx_prime -  A_prime * mxxI_b
+        R_yy = D_yy_prime -  A_prime * myyI_b
+        R_xy = D_xy_prime -  A_prime * mxyI_b
+
+        Mxx_prime_b = mxxp(xi, yj)
+        Myy_prime_b = myyp(xi, yj)
+        Mxy_prime_b =  (R_xy - Mxx_prime_b * L_11_xy - Myy_prime_b * L_22_xy) / L_12_xy
+
+        denominator = A_prime + (Mxx_prime_b*B11_prime + Myy_prime_b*B22_prime  + 2.0d0*Mxy_prime_b*B12_prime)
+        rho_prime_b = rhoI_b/denominator
+        
+        if(mom_collision) then
+            rho(xi, yj) = rho_prime_b
+            mxx(xi, yj) = Mxx_prime_b * (cth_glb(xi,yj)**2) + Myy_prime_b *(sth_glb(xi,yj)**2) - Mxy_prime_b * s2th_glb(xi,yj)
+            myy(xi, yj) = Mxx_prime_b * (sth_glb(xi,yj)**2) + Myy_prime_b *(cth_glb(xi,yj)**2) + Mxy_prime_b * s2th_glb(xi,yj)
+            mxy(xi, yj) = (Mxx_prime_b - Myy_prime_b) * 0.50d0 * s2th_glb(xi,yj) + Mxy_prime_b * c2th_glb(xi,yj)
+        end if
+
+        if(pop_collision) then
+            do k = 0, q-1
+                f(xi,yj,k) = w(k)*rho_prime_b*( 1.0d0 + (3.0d0*uxp*cx_p(xi, yj, k)) &
+                            & + (3.0d0*uyp*cy_p(xi, yj, k))  &
+                            & + (4.50d0*Mxx_prime_b*Hxx_p(xi, yj, k)) &
+                            & + (4.50d0*Myy_prime_b*Hyy_p(xi, yj, k)) &
+                            & + (9.0d0*Mxy_prime_b*Hxy_p(xi, yj, k)) )
+            end do
+        end if
+
+
+    end subroutine numerical_boundary_cases_rotation_weak
     
     subroutine numerical_boundary_cases_rotation_rhoeq(xi,yj,label,uxp,uyp)
         implicit none
