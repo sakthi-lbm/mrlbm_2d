@@ -2,7 +2,7 @@ program lbm_2d
     implicit none
     ! Parameters
     real(8), parameter :: PI = 4.0d0*atan(1.0d0)
-    integer :: num_threads=8
+    integer :: num_threads=16
     integer :: nprocsx, nprocsy
     integer :: iplot, max_iter, isave, irestart, statsbegin,statsend, iplotstats, cycle_period
     integer :: restart_step = 1
@@ -154,7 +154,7 @@ program lbm_2d
     open(unit=10,file='simulation_parameters.dat')
         write(10,*) 'nx,ny', nx,ny
         write(10,*) 'No. of points on diameter', ncy
-        write(10,*) 'centre_cylin', nfront + (ncy/2),nbot + ncy/2 
+        write(10,*) 'centre_cylin', nfront + (ncy/2),nbot + (ncy/2) - 1 
         write(10,*) 'Maximum_radius', r_cyl
         write(10,*) 'No. of points on cylinder:', nbct
         write(10,*) 'Re:', Re
@@ -909,7 +909,7 @@ contains
 
         !Cylinder center:
         x_c = real(nfront + (ncy/2) + 1)
-        y_c = real(nbot + ncy/2 + 1)
+        y_c = real(nbot + ncy/2 )
         r_c = real(ncy/2)
 
         do i = 1,nx
