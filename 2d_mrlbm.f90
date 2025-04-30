@@ -175,6 +175,8 @@ program lbm_2d
     end do
 
     ! Lattice Velocities and Second-order Hermite polynomial in rotated coordinates
+    !$omp parallel do collapse(2) private(i, j, k) shared(e, cth_glb, sth_glb, c2th_glb, s2th_glb,  &
+    !$omp& Hxx, Hyy, Hxy, cx_p, cy_p, Hxx_p, Hyy_p, Hxy_p)
     do i = 1, nx
         do j = 1, ny
             do k = 0, q-1
@@ -187,6 +189,7 @@ program lbm_2d
             end do
         end do
     end do
+    !$omp end parallel do
 
     if (irestart == 0) then
         ! Initialize
@@ -211,7 +214,7 @@ program lbm_2d
   do iter = restart_step+1, max_iter
 
     !Macroscopic variables:
-    !$omp parallel do private(i,j) shared( f, e, rho, ux, uy) schedule(guided) 
+    !$omp parallel do private(i,j) shared( f, e, rho, ux, uy, mxx, myy, mxy)
     do i = 1, nx
         do j = 1, ny
             rho(i, j) = sum(f(i, j, :))
@@ -225,9 +228,15 @@ program lbm_2d
     !$omp end parallel do
 
     !Free-density: Mean inlet density
-    rho_mean_counter = real(iter - restart_step)
+    rho_mean_counter = real(iter - (restart_step+1))
     rho_inf_mean = ((rho_mean_counter*rho_inf_mean) + rho(1,ny/2) )/(rho_mean_counter + 1.0d0)
     p_inf_mean = rho_inf_mean/3.0d0
+    
+    if(mod(iter, iplot)==0)then
+        open(unit=310, file='rho_mean_inlet.dat', access='append')
+            write(310,*) iter, rho_inf_mean
+        close(310)
+    end if
 
     !Boundary conditions:  MACROSCOPIC (DIRICHLET)
 
@@ -288,8 +297,8 @@ program lbm_2d
             !!Rotated coordinate system
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            !call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            !call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
             !call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
@@ -335,11 +344,33 @@ program lbm_2d
         end do
     end if
 
+    !Writing output file
+    !============================================================================================================================
+    if(post_process) then   
+        !output binary files	
+        if(mod(iter,iplot)==0)then
+            write (filename, 100) 'grid',10000000+iter,'.vtk',char(0)
+            write (filename_bin, 100) 'grid',10000000+iter,'.bin',char(0)
+            100 format (a4,I8,a4,a1)
+            if(channel_with_cylinder .or. channel_with_square) then
+                do  i = 1, nx
+                    do  j = 1, ny
+                        if(issolid(i,j)==1) then
+                            ux(i,j) = 0.0d0
+                            uy(i,j) = 0.0d0
+                        end if
+                    end do
+                end do
+            end if
+            call write_function_plot3d(filename_bin)
+        end if
+    end if
+
     !=============================================================================================================================
     !----------------------------------------------------------------------------------------------------	
     !Collision - Moments space
     !----------------------------------------------------------------------------------------------------	
-    !$omp parallel do collapse(2) shared(rho, mxx,myy,mxy, Hxx,Hyy,Hxy, fout)
+    !$omp parallel do collapse(2) shared(mxx, myy, mxy, ux, uy, omega) private(i, j)
     do i = 1, nx
         do j = 1, ny 
             mxx(i, j) =  (1.0d0 - omega)*mxx(i, j) + omega*ux(i, j)*ux(i, j)
@@ -348,19 +379,18 @@ program lbm_2d
         end do
     end do
     !$omp end parallel do
-
     !----------------------------------------------------------------------------------------------------	
     !Kinetic Projection / Regularization (using modified moments)
     !----------------------------------------------------------------------------------------------------	
-    !$omp parallel do collapse(2) private(cu, k) shared(e, ux, uy, rho, w, mxx,myy,mxy,Hxx,Hyy,Hxy, fout)
+    !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
     do i = 1, nx
         do j = 1, ny
             do k = 0, q-1
                 cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
                 fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
-                                & 4.50d0*mxx(i, j)*Hxx(k) + &
-                                & 4.50d0*myy(i, j)*Hyy(k) + &
-                                & 9.00d0*mxy(i, j)*Hxy(k) )
+                                 4.50d0*mxx(i, j)*Hxx(k) + &
+                                 4.50d0*myy(i, j)*Hyy(k) + &
+                                 9.00d0*mxy(i, j)*Hxy(k) )
             end do
         end do
     end do
@@ -451,26 +481,6 @@ program lbm_2d
 
         end if
 
-        !=======================================================================================================
-
-        !output binary files	
-        if(mod(iter,iplot)==0)then
-            write (filename, 100) 'grid',10000000+iter,'.vtk',char(0)
-            write (filename_bin, 100) 'grid',10000000+iter,'.bin',char(0)
-            100 format (a4,I8,a4,a1)
-            if(channel_with_cylinder .or. channel_with_square) then
-                do  i = 1, nx
-                    do  j = 1, ny
-                        if(issolid(i,j)==1) then
-                            ux(i,j) = 0.0d0
-                            uy(i,j) = 0.0d0
-                        end if
-                    end do
-                end do
-            end if
-            call write_function_plot3d(filename_bin)
-        end if
-
     end if      !write output condition
 
     call calculate_norm(ul2norm)
@@ -553,8 +563,8 @@ contains
         open(unit=201,file="data_mean/p_coeff.dat")
             do k = 1, nbct
                 if(thetas_cy(k) .le. PI) then
-                    write(201,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), (p_mean_cy(k) - p_inf_mean)/p_norm, &
-                        &  (p_fit(k) - p_inf_mean)/p_norm
+                    write(201,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), p_mean_cy(k), (p_mean_cy(k) - p_inf_mean)/p_norm, &
+                        &  p_fit(k), (p_fit(k) - p_inf_mean)/p_norm
                 end if
             end do
         close(201)
@@ -2129,29 +2139,20 @@ contains
         integer :: i, j, l, m 
         integer :: nblocks,nprocs
         character(len=100), intent(in) :: filename
+        real(8),dimension(1:nx, 1:ny) ::  var_rho, var_ux, var_uy
         real(8),dimension(1:nx, 1:ny) ::  var_mxxp, var_myyp, var_mxyp
 
         nprocs = 1
         nblocks = nprocs
-        do i = 1, nx
-            do j = 1, ny 
-                var_mxxp(i, j) =  sum(f(i, j, :) * Hxx_p(i, j, :)) / rho(i, j)
-                var_myyp(i, j) =  sum(f(i, j, :) * Hyy_p(i, j, :)) / rho(i, j)
-                var_mxyp(i, j) =  sum(f(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
-            end do
-        end do
 
         open(unit = 200, form = 'unformatted', file=output_dir_name//'/'//trim(filename))
             write(200) nblocks
-            write(200) (nx, ny, 6, l = 0, nprocs-1)
+            write(200) (nx, ny, 3, l = 0, nprocs-1)
             do m = 0, nprocs-1
                 write(200) &
                     & (( sngl(rho(i, j)), i = 1, nx), j = 1, ny), &
                     & (( sngl(ux(i, j)), i = 1, nx), j = 1, ny), &
-                    & (( sngl(uy(i, j)), i = 1, nx), j = 1, ny), &
-                    & (( sngl(var_mxxp(i, j)), i = 1, nx), j = 1, ny), &
-                    & (( sngl(var_myyp(i, j)), i = 1, nx), j = 1, ny), &
-                    & (( sngl(var_mxyp(i, j)), i = 1, nx), j = 1, ny)
+                    & (( sngl(uy(i, j)), i = 1, nx), j = 1, ny)
             end do
         close(200)
 
