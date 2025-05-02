@@ -1,6 +1,6 @@
 # Compiler and flags
 FC = gfortran
-FFLAGS = -O3
+FFLAGS = -fopenmp -O3
 
 # Files and output
 SRC = 2d_mrlbm.f90

@@ -11,7 +11,6 @@ program lbm_2d
     integer, allocatable,dimension(:,:) :: isfluid, issolid,isbound
     real(8), allocatable,dimension(:,:) :: x,y,xvar,yvar
     integer :: nbct
-    real(8), allocatable,dimension(:,:) :: boundary
     integer, allocatable,dimension(:) :: bou_i,bou_j,label_bc,idx
     integer :: nx,ny
     integer :: ncy, L_front,L_back,L_top,L_bot
@@ -19,19 +18,19 @@ program lbm_2d
     real(8) :: x_c,y_c,r_c,distance
     real(8) :: L_phy, nu_phy, u_phy, delx_phy, delt_phy
     real(8) :: L_lat, nu_lat, u_lat, delx_lat, delt_lat
-    real(8) :: error1, frob1,max_radii, r_cyl,p_int, ul2norm 
+    real(8) :: max_radii, r_cyl,p_int, ul2norm 
     real(8), allocatable,dimension(:, :) :: er,er1
 
     !LBM variables
     integer, parameter :: q = 9
     integer :: lattice_type 
     real(8), parameter :: rho0 = 1.0
-    real(8) :: Re,uo,nu,omega, uinlet,vinlet
+    real(8) :: Re,uo,rho_infty, p_infty,nu,omega, uinlet,vinlet
     real(8), allocatable,dimension(:) :: w,Hxx,Hyy,Hxy,Hxxy,Hxyy,Hxxyy
     real(8) :: cu
     real(8) :: dx, dy, delx
     real(8), allocatable,dimension(:, :, :) :: cx_p, cy_p, Hxx_p,Hyy_p,Hxy_p
-    integer, allocatable,dimension(:, :) :: e, e_p
+    integer, allocatable,dimension(:, :) :: e
     real(8), allocatable,dimension(:, :, :) :: f, f_eq, f_tmp,fin,fout
     real(8), allocatable, dimension(:, :) :: rho, p, ux, uy, mxx, myy, mxy,scalar
     real(8), allocatable, dimension(:, :) :: ux_prev, uy_prev
@@ -149,6 +148,8 @@ program lbm_2d
 
     delt_phy = (delx_phy**2)*nu_lat/nu_phy
 
+    p_infty = rho_infty/3.0d0
+
     call create_master_p3d_file()
 
     open(unit=10,file='simulation_parameters.dat')
@@ -208,16 +209,17 @@ program lbm_2d
 
     call finding_incoming_outgoing_pops()
 
-    open(unit=505,file='data_mean/lift_drag.dat')
+    
 
     ! Main loop
   do iter = restart_step+1, max_iter
 
     !Macroscopic variables:
-    !$omp parallel do private(i,j) shared( f, e, rho, ux, uy, mxx, myy, mxy)
+    !$omp parallel do private(i,j) shared( f, e, rho, p, ux, uy, mxx, myy, mxy)
     do i = 1, nx
         do j = 1, ny
             rho(i, j) = sum(f(i, j, :))
+            p(i, j) = rho(i, j)/3.0d0
             ux(i, j) = sum(f(i, j, :) * e(:, 1)) / rho(i, j)
             uy(i, j) = sum(f(i, j, :) * e(:, 2)) / rho(i, j)
             mxx(i, j) =  sum(f(i, j, :) * Hxx(:)) / rho(i, j)
@@ -226,17 +228,6 @@ program lbm_2d
         end do
     end do
     !$omp end parallel do
-
-    !Free-density: Mean inlet density
-    rho_mean_counter = real(iter - (restart_step+1))
-    rho_inf_mean = ((rho_mean_counter*rho_inf_mean) + rho(1,ny/2) )/(rho_mean_counter + 1.0d0)
-    p_inf_mean = rho_inf_mean/3.0d0
-    
-    if(mod(iter, iplot)==0)then
-        open(unit=310, file='rho_mean_inlet.dat', access='append')
-            write(310,*) iter, rho_inf_mean
-        close(310)
-    end if
 
     !Boundary conditions:  MACROSCOPIC (DIRICHLET)
 
@@ -297,7 +288,7 @@ program lbm_2d
             !!Rotated coordinate system
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            !call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            ! call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
             call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
             !call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
@@ -344,6 +335,17 @@ program lbm_2d
         end do
     end if
 
+    !Free-density: Mean inlet density
+    rho_mean_counter = real(iter - (restart_step+1))
+    rho_inf_mean = ((rho_mean_counter*rho_inf_mean) + rho(1,ny/2) )/(rho_mean_counter + 1.0d0)
+    p_inf_mean = rho_inf_mean/3.0d0
+    
+    if(mod(iter, 100)==0)then
+        open(unit=310, file='rho_mean_inlet.dat', access='append')
+            write(310,*) iter, rho_inf_mean, p_inf_mean
+        close(310)
+    end if
+
     !Writing output file
     !============================================================================================================================
     if(post_process) then   
@@ -366,87 +368,7 @@ program lbm_2d
         end if
     end if
 
-    !=============================================================================================================================
-    !----------------------------------------------------------------------------------------------------	
-    !Collision - Moments space
-    !----------------------------------------------------------------------------------------------------	
-    !$omp parallel do collapse(2) shared(mxx, myy, mxy, ux, uy, omega) private(i, j)
-    do i = 1, nx
-        do j = 1, ny 
-            mxx(i, j) =  (1.0d0 - omega)*mxx(i, j) + omega*ux(i, j)*ux(i, j)
-            myy(i, j) =  (1.0d0 - omega)*myy(i, j) + omega*uy(i, j)*uy(i, j)
-            mxy(i, j) =  (1.0d0 - omega)*mxy(i, j) + omega*ux(i, j)*uy(i, j)
-        end do
-    end do
-    !$omp end parallel do
-    !----------------------------------------------------------------------------------------------------	
-    !Kinetic Projection / Regularization (using modified moments)
-    !----------------------------------------------------------------------------------------------------	
-    !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
-    do i = 1, nx
-        do j = 1, ny
-            do k = 0, q-1
-                cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
-                fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
-                                 4.50d0*mxx(i, j)*Hxx(k) + &
-                                 4.50d0*myy(i, j)*Hyy(k) + &
-                                 9.00d0*mxy(i, j)*Hxy(k) )
-            end do
-        end do
-    end do
-    !$omp end parallel do
-
-    !Co-efficients Calculation:
-    if(channel_with_cylinder) then
-        do l = 1,nbct
-            i = bou_i(l)
-            j = bou_j(l)
-            call evaluate_forces(bou_i(l),bou_j(l),label_bc(l), F_drag(l), F_lift(l))
-        end do
-    end if
-    !Coefficients:
-    F_drag_mean = sum(F_drag(:))
-    F_lift_mean = sum(F_lift(:))
-    force_norm = r_cyl*rho_inf_mean*(uo**2)
-    C_drag_mean = F_drag_mean/force_norm
-    C_lift_mean = F_lift_mean/force_norm
-
-    write(505, *) iter, F_drag_mean, F_lift_mean, C_drag_mean, C_lift_mean
-
-
-    !----------------------------------------------------------------------------------------------------	
-    ! Streaming step
-    !----------------------------------------------------------------------------------------------------	
-    f_tmp = fout
-    do i = 1, nx
-        do j = 1, ny
-            do k = 0, q-1
-                if (i + e(k, 1) > 0 .and. i + e(k, 1) <= nx .and. j + e(k, 2) > 0 .and. j + e(k, 2) <= ny) then
-                    f(i + e(k, 1), j + e(k, 2), k) = f_tmp(i, j, k)
-                end if
-            end do
-        end do
-    end do
-
-    if(x_periodic) then
-        do j = 1, ny
-            do k = 0, q-1
-                if (1 - e(k, 1) < 1 ) f(1, j, k) = f_tmp(nx, j, k)
-                if (nx - e(k, 1) > nx) f(nx, j, k) = f_tmp(1, j, k)
-            end do
-        end do
-    end if
-
-    if(y_periodic) then
-        do i = 1, nx
-            do k = 0, q-1
-                if (1 - e(k, 2) < 1 ) f(i, 1, k) = f_tmp(i, ny, k)
-                if (ny - e(k, 2) > ny) f(i, ny, k) = f_tmp(i, 1, k)
-            end do
-        end do
-    end if
-
-
+    !=============================================================================================================
     !writing output files and statistics:
     if(post_process) then
 
@@ -482,6 +404,93 @@ program lbm_2d
         end if
 
     end if      !write output condition
+    !=============================================================================================================
+
+    !=============================================================================================================================
+    !----------------------------------------------------------------------------------------------------	
+    !Collision - Moments space
+    !----------------------------------------------------------------------------------------------------	
+    !$omp parallel do collapse(2) shared(mxx, myy, mxy, ux, uy, omega) private(i, j)
+    do i = 1, nx
+        do j = 1, ny 
+            mxx(i, j) =  (1.0d0 - omega)*mxx(i, j) + omega*ux(i, j)*ux(i, j)
+            myy(i, j) =  (1.0d0 - omega)*myy(i, j) + omega*uy(i, j)*uy(i, j)
+            mxy(i, j) =  (1.0d0 - omega)*mxy(i, j) + omega*ux(i, j)*uy(i, j)
+        end do
+    end do
+    !$omp end parallel do
+    !----------------------------------------------------------------------------------------------------	
+    !Kinetic Projection / Regularization (using modified moments)
+    !----------------------------------------------------------------------------------------------------	
+    !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
+    do i = 1, nx
+        do j = 1, ny
+            do k = 0, q-1
+                cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
+                fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
+                                 4.50d0*mxx(i, j)*Hxx(k) + &
+                                 4.50d0*myy(i, j)*Hyy(k) + &
+                                 9.00d0*mxy(i, j)*Hxy(k) )
+            end do
+        end do
+    end do
+    !$omp end parallel do
+
+    !=============================================================================================================
+    !writing output files and statistics:
+    if(post_process) then
+        if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
+            !Co-efficients Calculation:
+            do l = 1,nbct
+                i = bou_i(l)
+                j = bou_j(l)
+                call evaluate_forces(bou_i(l),bou_j(l),label_bc(l), F_drag(l), F_lift(l))
+            end do
+            !Coefficients:
+            F_drag_mean = sum(F_drag(:))
+            F_lift_mean = sum(F_lift(:))
+            force_norm = r_cyl*rho_infty*(uo**2)
+            C_drag_mean = F_drag_mean/force_norm
+            C_lift_mean = F_lift_mean/force_norm
+            open(unit=505,file='data_mean/lift_drag.dat', access='append')
+                write(505, *) iter, F_drag_mean, F_lift_mean, C_drag_mean, C_lift_mean
+            close(505)
+        end if
+
+    end if      !write output condition
+    !=============================================================================================================
+
+    !----------------------------------------------------------------------------------------------------	
+    ! Streaming step
+    !----------------------------------------------------------------------------------------------------	
+    f_tmp = fout
+    do i = 1, nx
+        do j = 1, ny
+            do k = 0, q-1
+                if (i + e(k, 1) > 0 .and. i + e(k, 1) <= nx .and. j + e(k, 2) > 0 .and. j + e(k, 2) <= ny) then
+                    f(i + e(k, 1), j + e(k, 2), k) = f_tmp(i, j, k)
+                end if
+            end do
+        end do
+    end do
+
+    if(x_periodic) then
+        do j = 1, ny
+            do k = 0, q-1
+                if (1 - e(k, 1) < 1 ) f(1, j, k) = f_tmp(nx, j, k)
+                if (nx - e(k, 1) > nx) f(nx, j, k) = f_tmp(1, j, k)
+            end do
+        end do
+    end if
+
+    if(y_periodic) then
+        do i = 1, nx
+            do k = 0, q-1
+                if (1 - e(k, 2) < 1 ) f(i, 1, k) = f_tmp(i, ny, k)
+                if (ny - e(k, 2) > ny) f(i, ny, k) = f_tmp(i, 1, k)
+            end do
+        end do
+    end if
 
     call calculate_norm(ul2norm)
 
@@ -497,7 +506,6 @@ program lbm_2d
 
  end do         !Main loop end
 
-    close(505)
 contains
 
     subroutine evaluate_forces(xi,yj,label, F_x, F_y)
@@ -527,8 +535,8 @@ contains
             end if
         end do
 
-        F_x = Fx_out + Fx_inc
-        F_y = Fy_out + Fy_inc
+        F_x = Fx_inc - Fx_out
+        F_y = Fy_inc - Fy_out 
 
     end subroutine evaluate_forces
 
@@ -536,50 +544,49 @@ contains
         implicit none
         integer :: i, j, k
 
-        do k = 1, nbct
-            p_costheta(k)  = p_mean_cy(k) * cths_cyl(k)
-            tw_sintheta(k) = tw_mean_cy(k) * sths_cyl(k)
-            p_sintheta(k)  = p_mean_cy(k) * sths_cyl(k)
-            tw_costheta(k) = tw_mean_cy(k) * cths_cyl(k)
-        end do
+        ! do k = 1, nbct
+        !     p_costheta(k)  = p_mean_cy(k) * cths_cyl(k)
+        !     tw_sintheta(k) = tw_mean_cy(k) * sths_cyl(k)
+        !     p_sintheta(k)  = p_mean_cy(k) * sths_cyl(k)
+        !     tw_costheta(k) = tw_mean_cy(k) * cths_cyl(k)
+        ! end do
 
-        call trapezoidal_sub(nbct,thetas_cy,p_costheta, pres_drag)
-        call trapezoidal_sub(nbct,thetas_cy,tw_sintheta, vis_drag)
-        call trapezoidal_sub(nbct,thetas_cy,p_sintheta, pres_lift)
-        call trapezoidal_sub(nbct,thetas_cy,tw_costheta, vis_lift)
+        ! call trapezoidal_sub(nbct,thetas_cy,p_costheta, pres_drag)
+        ! call trapezoidal_sub(nbct,thetas_cy,tw_sintheta, vis_drag)
+        ! call trapezoidal_sub(nbct,thetas_cy,p_sintheta, pres_lift)
+        ! call trapezoidal_sub(nbct,thetas_cy,tw_costheta, vis_lift)
 
-        !Force calculation:
-        F_drag_mean = r_cyl*(-pres_drag + vis_drag)
-        F_lift_mean = r_cyl*(-pres_lift - vis_lift)
+        ! !Force calculation:
+        ! F_drag_mean = r_cyl*(-pres_drag + vis_drag)
+        ! F_lift_mean = r_cyl*(-pres_lift - vis_lift)
 
-        !print*,iter, F_drag_mean, F_lift_mean
+        ! !Coefficients:
+        ! force_norm = r_cyl*rho_infty*(uo**2)
+        ! C_drag_mean = F_drag_mean/force_norm
+        ! C_lift_mean = F_lift_mean/force_norm
 
-        !Coefficients:
-        force_norm = r_cyl*rho_inf_mean*(uo**2)
-        p_norm = 0.50d0*rho_inf_mean*(uo**2)
-        C_drag_mean = F_drag_mean/force_norm
-        C_lift_mean = F_lift_mean/force_norm
-
+        print*, "Writing Cp values after", (iter - statsbegin)/cycle_period, "cycle(s)" 
+        p_norm = 0.50d0*rho_infty*(uo**2)
         open(unit=201,file="data_mean/p_coeff.dat")
             do k = 1, nbct
                 if(thetas_cy(k) .le. PI) then
-                    write(201,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), p_mean_cy(k), (p_mean_cy(k) - p_inf_mean)/p_norm, &
-                        &  p_fit(k), (p_fit(k) - p_inf_mean)/p_norm
+                    write(201,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), p_mean_cy(k), (p_mean_cy(k) - p_infty)/p_norm, &
+                        &  p_fit(k), (p_fit(k) - p_infty)/p_norm
                 end if
             end do
         close(201)
-        open(unit=202,file="data_mean/skin_friction.dat")
-            do k = 1, nbct
-                if(thetas_cy(k) .le. PI) then
-                    write(202,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), tw_mean_cy(k)/p_norm, tw_fit(k)/p_norm
-                end if
-            end do
-        close(202)
+        ! open(unit=202,file="data_mean/skin_friction.dat")
+        !     do k = 1, nbct
+        !         if(thetas_cy(k) .le. PI) then
+        !             write(202,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), tw_mean_cy(k)/p_norm, tw_fit(k)/p_norm
+        !         end if
+        !     end do
+        ! close(202)
 
-        open(unit=203,file="data_mean/coefficients.dat")
-            write(203,*) "Drag, C_D:", C_drag_mean
-            write(203,*) "Lift, C_L:", C_lift_mean
-        close(203)
+        ! open(unit=203,file="data_mean/coefficients.dat")
+        !     write(203,*) "Drag, C_D:", C_drag_mean
+        !     write(203,*) "Lift, C_L:", C_lift_mean
+        ! close(203)
 
     end subroutine write_statistics_out
 
@@ -590,16 +597,18 @@ contains
 
         mean_counter = real(step - statsbegin)
 
-        do i = 1, nx
-            do j = 1, ny
-                rho(i, j) =  sum(f(i, j, :))
-                p(i, j) = rho(i, j)/3.0d0
-                mxyp(i, j) =  sum(f(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
-            end do
-        end do
+        ! do i = 1, nx
+        !     do j = 1, ny
+        !         rho(i, j) =  sum(f(i, j, :))
+        !         p(i, j) = rho(i, j)/3.0d0
+        !         mxyp(i, j) =  sum(f(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
+        !     end do
+        ! end do
+        
+        call var_surface_interpolation(p, p_cy)
 
-        call extrapolate_var_on_cylinder(p, p_cy)
-        call extrapolate_var_on_cylinder(mxyp, mxyp_cy)
+        ! call extrapolate_var_on_cylinder(p, p_cy)
+        ! call extrapolate_var_on_cylinder(mxyp, mxyp_cy)
 
         do k = 1,nbct
             ps_cy(k) = p_cy(idx(k))
@@ -608,16 +617,16 @@ contains
             sths_cyl(k) = sth_cyl(idx(k))
 
             !wall shear stress
-            tw_cy(k) = (-3.0d0 * nu * omega) * mxyps_cy(k)
+            ! tw_cy(k) = (-3.0d0 * nu * omega) * mxyps_cy(k)
             !tw_cy(k) = (-9.0d0 * nu * omega) * ps_cy(k) * mxyps_cy(k)
 
             !Mean pressure and mean shear stress calculation
             p_mean_cy(k) = ((mean_counter*p_mean_cy(k)) + ps_cy(k) )/(mean_counter + 1.0d0)
-            tw_mean_cy(k) = ((mean_counter*tw_mean_cy(k)) + tw_cy(k) )/(mean_counter + 1.0d0)
+            ! tw_mean_cy(k) = ((mean_counter*tw_mean_cy(k)) + tw_cy(k) )/(mean_counter + 1.0d0)
         end do
 
         call gaussian_smoothing(nbct,thetas_cy,p_mean_cy,p_fit)
-        call gaussian_smoothing(nbct,thetas_cy,tw_mean_cy,tw_fit)
+        ! call gaussian_smoothing(nbct,thetas_cy,tw_mean_cy,tw_fit)
 
     end subroutine time_averaging_statistics
 
@@ -685,7 +694,7 @@ contains
         real(8), intent(in) :: x_int(n_int), fx_int(n_int)
         real(8), intent(out) :: integral
         integer :: i
-        real :: dx_int
+        real(8) :: dx_int
 
         integral = 0.0d0
         do i = 1, n_int - 1
@@ -739,6 +748,50 @@ contains
         p_s = a0 + a1*rs + a2*(rs**2)
 
     end subroutine quadratic_interpolation
+
+    subroutine var_surface_interpolation(var_glb, var_cy)
+        implicit none
+        real(8), intent(in), dimension(1:nx, 1:ny) :: var_glb
+        real(8), intent(out), dimension(1:nbct) :: var_cy
+        real(8) :: term1,term2,term3
+        real(8) :: xd,yd,var_0,var_1
+        integer :: i,j,k
+
+        do k = 1,nbct
+            i = bou_i(k)
+            j = bou_j(k)
+
+            !First reference node: boundary point
+            var_ref1(k) = var_glb(i, j)
+
+            !Second reference node: First fluid point
+            xd = (x_ref2(k) - x(i_p2(1,k),j_p2(1,k)))/dx
+            yd = (y_ref2(k) - y(i_p2(1,k),j_p2(1,k)))/dy
+
+            var_0 = (1.0d0 - xd)*var_glb(i_p2(1,k),j_p2(1,k)) + xd*var_glb(i_p2(2,k),j_p2(2,k))
+            var_1 = (1.0d0 - xd)*var_glb(i_p2(3,k),j_p2(3,k)) + xd*var_glb(i_p2(4,k),j_p2(4,k))
+
+            var_ref2(k) =  (1.0d0 - yd)*var_0 + yd*var_1
+
+            !Third reference node: Second fluid point
+            xd = (x_ref3(k) - x(i_p3(1,k),j_p3(1,k)))/dx
+            yd = (y_ref3(k) - y(i_p3(1,k),j_p3(1,k)))/dy
+
+            var_0 = (1.0d0 - xd)*var_glb(i_p3(1,k),j_p3(1,k)) + xd*var_glb(i_p3(2,k),j_p3(2,k))
+            var_1 = (1.0d0 - xd)*var_glb(i_p3(3,k),j_p3(3,k)) + xd*var_glb(i_p3(4,k),j_p3(4,k))
+
+            var_ref3(k) =  (1.0d0 - yd)*var_0 + yd*var_1
+
+            !Variable interpolation: CYLINDER SURFACE
+            term1 = (2.0d0*delx*delx - (delta_uk(k)**2) + 3.0d0* delta_uk(k)*delx)/(2.0d0*(delx**2))
+            term2 =  delta_uk(k)*( delta_uk(k) - 2.0d0*delx)/(delx**2)
+            term3 =  delta_uk(k)*( delta_uk(k) - delx)/(2.0d0*(delx**2))
+            !Boundary node velocities:
+            var_cy(k) = (var_ref1(k) - term2*var_ref2(k) + term3*var_ref3(k))/term1
+
+        end do
+
+    end subroutine var_surface_interpolation
 
     subroutine velocity_interpolation_boundary_nodes()
         implicit none
@@ -2204,7 +2257,7 @@ contains
         namelist/Cylinder/ncy,L_front,L_back,L_top,L_bot
         namelist/Numbers/Re
         namelist/Parallel/nprocsx,nprocsy
-        namelist/Controls/uo,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats, cycle_period
+        namelist/Controls/uo,rho_infty,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats, cycle_period
         namelist/LogicalControls/post_process, x_periodic,y_periodic,channel_with_cylinder,channel_with_square, &
             & incomp,vel_interp, mom_interp, rotated_coordinate
 
