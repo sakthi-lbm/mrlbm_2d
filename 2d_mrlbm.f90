@@ -55,6 +55,7 @@ program lbm_2d
     real(8) :: rho_inf_mean, p_inf_mean, mean_counter, rho_mean_counter, vis_drag, vis_lift, pres_drag, pres_lift
     real(8) :: vis_drag_mean, vis_lift_mean, pres_drag_mean, pres_lift_mean
     real(8) :: F_drag_mean, F_lift_mean, C_drag_mean, C_lift_mean, force_norm, p_norm
+    real(8) :: avg_counter, F_drag_avg, F_lift_rms, C_drag_avg, C_lift_rms
     integer :: i, j, k, l, iter, coord_i,coord_j
     integer :: i_probe1, j_probe1, i_probe2, j_probe2, i_probe3, j_probe3, i_probe4, j_probe4
 
@@ -288,8 +289,8 @@ program lbm_2d
             !!Rotated coordinate system
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            ! call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            ! call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
             !call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
@@ -449,12 +450,32 @@ program lbm_2d
             !Coefficients:
             F_drag_mean = sum(F_drag(:))
             F_lift_mean = sum(F_lift(:))
+
             force_norm = r_cyl*rho_infty*(uo**2)
+
+            !Mean value over cylinder surface
             C_drag_mean = F_drag_mean/force_norm
             C_lift_mean = F_lift_mean/force_norm
+            
+            !Time-averaging
+            avg_counter = real(iter - statsbegin)
+            F_drag_avg = ((avg_counter*F_drag_avg) + F_drag_mean )/(avg_counter + 1.0d0)
+            F_lift_rms = ((avg_counter*F_lift_rms) + (F_lift_mean**2) )/(avg_counter + 1.0d0)
+            C_drag_avg = F_drag_avg/force_norm
+            C_lift_rms = sqrt(F_lift_rms)/force_norm
+
             open(unit=505,file='data_mean/lift_drag.dat', access='append')
                 write(505, *) iter, F_drag_mean, F_lift_mean, C_drag_mean, C_lift_mean
             close(505)
+
+            if(mod((iter - statsbegin),cycle_period)==0) then
+                open(unit=506,file='data_mean/coeffs.dat', access='append')
+                    write(506, *) "Cylce: ",(iter - statsbegin)/cycle_period
+                    write(506, *) "Drag coeff (C_D): ", C_drag_avg 
+                    write(506, *) "Lift coeff (C_L): ", C_lift_rms
+                    write(506, *) " " 
+                close(506)
+            end if
         end if
 
     end if      !write output condition
@@ -605,9 +626,9 @@ contains
         !     end do
         ! end do
         
-        call var_surface_interpolation(p, p_cy)
+        ! call var_surface_interpolation(p, p_cy)
 
-        ! call extrapolate_var_on_cylinder(p, p_cy)
+        call extrapolate_var_on_cylinder(p, p_cy)
         ! call extrapolate_var_on_cylinder(mxyp, mxyp_cy)
 
         do k = 1,nbct
