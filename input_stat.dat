@@ -1,0 +1,5 @@
+&parameters
+	nbct = 160
+	r_cy = 20.39610
+	uo = 0.10
+	rho_infty = 1.1966220

@@ -2,7 +2,7 @@ program lbm_2d
     implicit none
     ! Parameters
     real(8), parameter :: PI = 4.0d0*atan(1.0d0)
-    integer :: num_threads=16
+    integer :: num_threads=4
     integer :: nprocsx, nprocsy
     integer :: iplot, max_iter, isave, irestart, statsbegin,statsend, iplotstats, cycle_period
     integer :: restart_step = 1
@@ -18,7 +18,7 @@ program lbm_2d
     real(8) :: x_c,y_c,r_c,distance
     real(8) :: L_phy, nu_phy, u_phy, delx_phy, delt_phy
     real(8) :: L_lat, nu_lat, u_lat, delx_lat, delt_lat
-    real(8) :: max_radii, r_cyl,p_int, ul2norm 
+    real(8) :: max_radii, r_cyl, ul2norm 
     real(8), allocatable,dimension(:, :) :: er,er1
 
     !LBM variables
@@ -52,12 +52,11 @@ program lbm_2d
     real(8), allocatable,dimension(:) :: theta_cy, p_cy, mxyp_cy, tw_cy
     real(8), allocatable,dimension(:) :: F_drag, F_lift
     real(8), allocatable,dimension(:) :: p_costheta, p_sintheta, tw_costheta, tw_sintheta
-    real(8) :: rho_inf_mean, p_inf_mean, mean_counter, rho_mean_counter, vis_drag, vis_lift, pres_drag, pres_lift
-    real(8) :: vis_drag_mean, vis_lift_mean, pres_drag_mean, pres_lift_mean
-    real(8) :: F_drag_mean, F_lift_mean, C_drag_mean, C_lift_mean, force_norm, p_norm
-    real(8) :: avg_counter, F_drag_avg, F_lift_rms, C_drag_avg, C_lift_rms
+    real(8) :: rho_inf_mean, p_inf_mean, rho_mean_counter
+    real(8) :: F_drag_net, F_lift_net
     integer :: i, j, k, l, iter, coord_i,coord_j
     integer :: i_probe1, j_probe1, i_probe2, j_probe2, i_probe3, j_probe3, i_probe4, j_probe4
+    integer :: unit_p = 301, unit_f = 302
 
     !logics
     character (len=6) :: output_dir_name = 'output'//char(0)
@@ -210,6 +209,14 @@ program lbm_2d
 
     call finding_incoming_outgoing_pops()
 
+
+    !Clearing content in files
+    open(unit=unit_p, file='data_mean/p_surface_time.dat', status='replace')
+    close(unit_p)
+    open(unit=unit_p, file='data_mean/p_surface_smooth_time.dat', status='replace')
+    close(unit_p)
+    open(unit=unit_f, file='data_mean/forces_time.dat', status='replace')
+    close(unit_f)
     
 
     ! Main loop
@@ -289,9 +296,9 @@ program lbm_2d
             !!Rotated coordinate system
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            ! call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
             ! call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            !call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
     end if
@@ -369,44 +376,6 @@ program lbm_2d
         end if
     end if
 
-    !=============================================================================================================
-    !writing output files and statistics:
-    if(post_process) then
-
-        if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
-        if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
-        if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
-
-        write(101,*) iter, rho(i_probe1,j_probe1)/3.0d0, rho(i_probe2,j_probe2)/3.0d0, &
-            & rho(i_probe3,j_probe3)/3.0d0, rho(i_probe4,j_probe4)/3.0d0 
-        write(102,*) iter, ux(i_probe1,j_probe1)/3.0d0, ux(i_probe2,j_probe2)/3.0d0, &
-            & ux(i_probe3,j_probe3)/3.0d0, ux(i_probe4,j_probe4)/3.0d0 
-        write(103,*) iter, uy(i_probe1,j_probe1)/3.0d0, uy(i_probe2,j_probe2)/3.0d0, &
-            & uy(i_probe3,j_probe3)/3.0d0, uy(i_probe4,j_probe4)/3.0d0
-
-        if(iter == statsend) close(101)	
-        if(iter == statsend) close(102)	
-        if(iter == statsend) close(103)	
-
-
-        !Statistics
-        !=======================================================================================================
-
-        if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
-
-            call time_averaging_statistics(iter)
-
-            if(mod((iter-statsbegin),cycle_period)==0) then
-
-                call write_statistics_out()
-
-            end if
-
-        end if
-
-    end if      !write output condition
-    !=============================================================================================================
-
     !=============================================================================================================================
     !----------------------------------------------------------------------------------------------------	
     !Collision - Moments space
@@ -440,42 +409,45 @@ program lbm_2d
     !=============================================================================================================
     !writing output files and statistics:
     if(post_process) then
+        if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
+        if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
+        if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
+
+        if(iter == statsend) close(101)
+        if(iter == statsend) close(102)
+        if(iter == statsend) close(103)
+
+
+        !Statistics
+        !=======================================================================================================
+
         if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
-            !Co-efficients Calculation:
+            !writing proble values
+            write(101,*) iter, rho(i_probe1,j_probe1)/3.0d0, rho(i_probe2,j_probe2)/3.0d0, &
+                & rho(i_probe3,j_probe3)/3.0d0, rho(i_probe4,j_probe4)/3.0d0 
+            write(102,*) iter, ux(i_probe1,j_probe1)/3.0d0, ux(i_probe2,j_probe2)/3.0d0, &
+                & ux(i_probe3,j_probe3)/3.0d0, ux(i_probe4,j_probe4)/3.0d0 
+            write(103,*) iter, uy(i_probe1,j_probe1)/3.0d0, uy(i_probe2,j_probe2)/3.0d0, &
+                & uy(i_probe3,j_probe3)/3.0d0, uy(i_probe4,j_probe4)/3.0d0
+
+            !writing surface pressure signal
+            call write_statistics_out(iter)
+
+            !Force Calculation:
             do l = 1,nbct
                 i = bou_i(l)
                 j = bou_j(l)
                 call evaluate_forces(bou_i(l),bou_j(l),label_bc(l), F_drag(l), F_lift(l))
             end do
-            !Coefficients:
-            F_drag_mean = sum(F_drag(:))
-            F_lift_mean = sum(F_lift(:))
 
-            force_norm = r_cyl*rho_infty*(uo**2)
+            F_drag_net = sum(F_drag(:))
+            F_lift_net = sum(F_lift(:))
 
-            !Mean value over cylinder surface
-            C_drag_mean = F_drag_mean/force_norm
-            C_lift_mean = F_lift_mean/force_norm
-            
-            !Time-averaging
-            avg_counter = real(iter - statsbegin)
-            F_drag_avg = ((avg_counter*F_drag_avg) + F_drag_mean )/(avg_counter + 1.0d0)
-            F_lift_rms = ((avg_counter*F_lift_rms) + (F_lift_mean**2) )/(avg_counter + 1.0d0)
-            C_drag_avg = F_drag_avg/force_norm
-            C_lift_rms = sqrt(F_lift_rms)/force_norm
+            !writing force values over the time
+            open(unit=unit_f, file='data_mean/forces_time.dat', status='unknown', position='append', action='write')
+                write(unit_f,*) iter, F_drag_net, F_lift_net
+            close(unit_f)
 
-            open(unit=505,file='data_mean/lift_drag.dat', access='append')
-                write(505, *) iter, F_drag_mean, F_lift_mean, C_drag_mean, C_lift_mean
-            close(505)
-
-            if(mod((iter - statsbegin),cycle_period)==0) then
-                open(unit=506,file='data_mean/coeffs.dat', access='append')
-                    write(506, *) "Cylce: ",(iter - statsbegin)/cycle_period
-                    write(506, *) "Drag coeff (C_D): ", C_drag_avg 
-                    write(506, *) "Lift coeff (C_L): ", C_lift_rms
-                    write(506, *) " " 
-                close(506)
-            end if
         end if
 
     end if      !write output condition
@@ -561,100 +533,37 @@ contains
 
     end subroutine evaluate_forces
 
-    subroutine write_statistics_out()
+    subroutine write_statistics_out(step)
         implicit none
+        integer, intent(in) :: step
         integer :: i, j, k
 
-        ! do k = 1, nbct
-        !     p_costheta(k)  = p_mean_cy(k) * cths_cyl(k)
-        !     tw_sintheta(k) = tw_mean_cy(k) * sths_cyl(k)
-        !     p_sintheta(k)  = p_mean_cy(k) * sths_cyl(k)
-        !     tw_costheta(k) = tw_mean_cy(k) * cths_cyl(k)
-        ! end do
+        call extrapolate_var_on_cylinder(p, p_cy)
+        ! call interpolate_var_on_cylinder(p, p_cy)
 
-        ! call trapezoidal_sub(nbct,thetas_cy,p_costheta, pres_drag)
-        ! call trapezoidal_sub(nbct,thetas_cy,tw_sintheta, vis_drag)
-        ! call trapezoidal_sub(nbct,thetas_cy,p_sintheta, pres_lift)
-        ! call trapezoidal_sub(nbct,thetas_cy,tw_costheta, vis_lift)
+        !Sorting pressure values for theta goes form 0 to 2*pi
+        do k = 1,nbct
+            ps_cy(k) = p_cy(idx(k))
+        end do
 
-        ! !Force calculation:
-        ! F_drag_mean = r_cyl*(-pres_drag + vis_drag)
-        ! F_lift_mean = r_cyl*(-pres_lift - vis_lift)
+        !Smoothening the surface pressure over theta
+        call gaussian_smoothing(nbct,thetas_cy,ps_cy,p_fit)
 
-        ! !Coefficients:
-        ! force_norm = r_cyl*rho_infty*(uo**2)
-        ! C_drag_mean = F_drag_mean/force_norm
-        ! C_lift_mean = F_lift_mean/force_norm
-
-        print*, "Writing Cp values after", (iter - statsbegin)/cycle_period, "cycle(s)" 
-        p_norm = 0.50d0*rho_infty*(uo**2)
-        open(unit=201,file="data_mean/p_coeff.dat")
-            do k = 1, nbct
-                if(thetas_cy(k) .le. PI) then
-                    write(201,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), p_mean_cy(k), (p_mean_cy(k) - p_infty)/p_norm, &
-                        &  p_fit(k), (p_fit(k) - p_infty)/p_norm
-                end if
-            end do
-        close(201)
-        ! open(unit=202,file="data_mean/skin_friction.dat")
-        !     do k = 1, nbct
-        !         if(thetas_cy(k) .le. PI) then
-        !             write(202,*) abs((thetas_cy(k)*180.0d0/PI)-180.0d0), tw_mean_cy(k)/p_norm, tw_fit(k)/p_norm
-        !         end if
-        !     end do
-        ! close(202)
-
-        ! open(unit=203,file="data_mean/coefficients.dat")
-        !     write(203,*) "Drag, C_D:", C_drag_mean
-        !     write(203,*) "Lift, C_L:", C_lift_mean
-        ! close(203)
+        open(unit=unit_p, file='data_mean/p_surface_time.dat', status='unknown', position='append', &
+                &action='write', form='unformatted')
+            write(unit_p) step, ( (ps_cy(k)), k = 1, nbct)
+        close(unit_p)
+        open(unit=unit_p, file='data_mean/p_surface_smooth_time.dat', status='unknown', position='append', &
+                & action='write', form='unformatted')
+            write(unit_p) step, ( (p_fit(k)), k = 1, nbct)
+        close(unit_p)
 
     end subroutine write_statistics_out
 
-    subroutine time_averaging_statistics(step)
+    subroutine extrapolate_var_on_cylinder(var_glb, var_cy)
         implicit none
-        integer, intent(in) :: step
-        integer :: i,j,k
-
-        mean_counter = real(step - statsbegin)
-
-        ! do i = 1, nx
-        !     do j = 1, ny
-        !         rho(i, j) =  sum(f(i, j, :))
-        !         p(i, j) = rho(i, j)/3.0d0
-        !         mxyp(i, j) =  sum(f(i, j, :) * Hxy_p(i, j, :)) / rho(i, j)
-        !     end do
-        ! end do
-        
-        ! call var_surface_interpolation(p, p_cy)
-
-        call extrapolate_var_on_cylinder(p, p_cy)
-        ! call extrapolate_var_on_cylinder(mxyp, mxyp_cy)
-
-        do k = 1,nbct
-            ps_cy(k) = p_cy(idx(k))
-            mxyps_cy(k) = mxyp_cy(idx(k))
-            cths_cyl(k) = cth_cyl(idx(k))
-            sths_cyl(k) = sth_cyl(idx(k))
-
-            !wall shear stress
-            ! tw_cy(k) = (-3.0d0 * nu * omega) * mxyps_cy(k)
-            !tw_cy(k) = (-9.0d0 * nu * omega) * ps_cy(k) * mxyps_cy(k)
-
-            !Mean pressure and mean shear stress calculation
-            p_mean_cy(k) = ((mean_counter*p_mean_cy(k)) + ps_cy(k) )/(mean_counter + 1.0d0)
-            ! tw_mean_cy(k) = ((mean_counter*tw_mean_cy(k)) + tw_cy(k) )/(mean_counter + 1.0d0)
-        end do
-
-        call gaussian_smoothing(nbct,thetas_cy,p_mean_cy,p_fit)
-        ! call gaussian_smoothing(nbct,thetas_cy,tw_mean_cy,tw_fit)
-
-    end subroutine time_averaging_statistics
-
-    subroutine extrapolate_var_on_cylinder(var_int, int_var_cy)
-        implicit none
-        real(8),dimension(1:nx,1:ny),intent(in) :: var_int
-        real(8),dimension(1:nbct),intent(out) :: int_var_cy
+        real(8),dimension(1:nx,1:ny),intent(in) :: var_glb
+        real(8),dimension(1:nbct),intent(out) :: var_cy
         real(8) :: x1,y1,var1,x2,y2,var2,x3,y3,var3,x4,y4,var4
         real(8) :: xd,yd,var_0,var_1
         real(8) :: xs,ys,vars
@@ -668,8 +577,8 @@ contains
             xd = (x_ref2(k) - x(i_p2(1,k),j_p2(1,k)))/dx
             yd = (y_ref2(k) - y(i_p2(1,k),j_p2(1,k)))/dy
 
-            var_0 = (1.0d0 - xd)*var_int(i_p2(1,k),j_p2(1,k)) + xd*var_int(i_p2(2,k),j_p2(2,k))
-            var_1 = (1.0d0 - xd)*var_int(i_p2(3,k),j_p2(3,k)) + xd*var_int(i_p2(4,k),j_p2(4,k))
+            var_0 = (1.0d0 - xd)*var_glb(i_p2(1,k),j_p2(1,k)) + xd*var_glb(i_p2(2,k),j_p2(2,k))
+            var_1 = (1.0d0 - xd)*var_glb(i_p2(3,k),j_p2(3,k)) + xd*var_glb(i_p2(4,k),j_p2(4,k))
 
             var_ref2(k) =  (1.0d0 - yd)*var_0 + yd*var_1
 
@@ -677,8 +586,8 @@ contains
             xd = (x_ref3(k) - x(i_p3(1,k),j_p3(1,k)))/dx
             yd = (y_ref3(k) - y(i_p3(1,k),j_p3(1,k)))/dy
 
-            var_0 = (1.0d0 - xd)*var_int(i_p3(1,k),j_p3(1,k)) + xd*var_int(i_p3(2,k),j_p3(2,k))
-            var_1 = (1.0d0 - xd)*var_int(i_p3(3,k),j_p3(3,k)) + xd*var_int(i_p3(4,k),j_p3(4,k))
+            var_0 = (1.0d0 - xd)*var_glb(i_p3(1,k),j_p3(1,k)) + xd*var_glb(i_p3(2,k),j_p3(2,k))
+            var_1 = (1.0d0 - xd)*var_glb(i_p3(3,k),j_p3(3,k)) + xd*var_glb(i_p3(4,k),j_p3(4,k))
 
             var_ref3(k) =  (1.0d0 - yd)*var_0 + yd*var_1
 
@@ -686,8 +595,8 @@ contains
             xd = (x_ref4(k) - x(i_p4(1,k),j_p4(1,k)))/dx
             yd = (y_ref4(k) - y(i_p4(1,k),j_p4(1,k)))/dy
 
-            var_0 = (1.0d0 - xd)*var_int(i_p4(1,k),j_p4(1,k)) + xd*var_int(i_p4(2,k),j_p4(2,k))
-            var_1 = (1.0d0 - xd)*var_int(i_p4(3,k),j_p4(3,k)) + xd*var_int(i_p4(4,k),j_p4(4,k))
+            var_0 = (1.0d0 - xd)*var_glb(i_p4(1,k),j_p4(1,k)) + xd*var_glb(i_p4(2,k),j_p4(2,k))
+            var_1 = (1.0d0 - xd)*var_glb(i_p4(3,k),j_p4(3,k)) + xd*var_glb(i_p4(4,k),j_p4(4,k))
 
             var_ref4(k) =  (1.0d0 - yd)*var_0 + yd*var_1
 
@@ -704,25 +613,54 @@ contains
             var3 = var_ref3(k)
             var4 = var_ref4(k)
             call quadratic_interpolation(x2,y2,var2,x3,y3,var3,x4,y4,var4,xs,ys,vars)
-            int_var_cy(k) = vars			
+            var_cy(k) = vars
         end do
 
     end subroutine extrapolate_var_on_cylinder
 
-    subroutine trapezoidal_sub(n_int,x_int, fx_int, integral)
+    subroutine interpolate_var_on_cylinder(var_glb, var_cy)
         implicit none
-        integer, intent(in) :: n_int
-        real(8), intent(in) :: x_int(n_int), fx_int(n_int)
-        real(8), intent(out) :: integral
-        integer :: i
-        real(8) :: dx_int
+        real(8), intent(in), dimension(1:nx, 1:ny) :: var_glb
+        real(8), intent(out), dimension(1:nbct) :: var_cy
+        real(8) :: term1,term2,term3
+        real(8) :: xd,yd,var_0,var_1
+        integer :: i,j,k
 
-        integral = 0.0d0
-        do i = 1, n_int - 1
-            dx_int = x_int(i+1) - x_int(i)
-            integral = integral + 0.50d0 * (fx_int(i) + fx_int(i+1)) * dx_int
+        do k = 1,nbct
+            i = bou_i(k)
+            j = bou_j(k)
+
+            !First reference node: boundary point
+            var_ref1(k) = var_glb(i, j)
+
+            !Second reference node: First fluid point
+            xd = (x_ref2(k) - x(i_p2(1,k),j_p2(1,k)))/dx
+            yd = (y_ref2(k) - y(i_p2(1,k),j_p2(1,k)))/dy
+
+            var_0 = (1.0d0 - xd)*var_glb(i_p2(1,k),j_p2(1,k)) + xd*var_glb(i_p2(2,k),j_p2(2,k))
+            var_1 = (1.0d0 - xd)*var_glb(i_p2(3,k),j_p2(3,k)) + xd*var_glb(i_p2(4,k),j_p2(4,k))
+
+            var_ref2(k) =  (1.0d0 - yd)*var_0 + yd*var_1
+
+            !Third reference node: Second fluid point
+            xd = (x_ref3(k) - x(i_p3(1,k),j_p3(1,k)))/dx
+            yd = (y_ref3(k) - y(i_p3(1,k),j_p3(1,k)))/dy
+
+            var_0 = (1.0d0 - xd)*var_glb(i_p3(1,k),j_p3(1,k)) + xd*var_glb(i_p3(2,k),j_p3(2,k))
+            var_1 = (1.0d0 - xd)*var_glb(i_p3(3,k),j_p3(3,k)) + xd*var_glb(i_p3(4,k),j_p3(4,k))
+
+            var_ref3(k) =  (1.0d0 - yd)*var_0 + yd*var_1
+
+            !Variable interpolation: CYLINDER SURFACE
+            term1 = (2.0d0*delx*delx - (delta_uk(k)**2) + 3.0d0* delta_uk(k)*delx)/(2.0d0*(delx**2))
+            term2 =  delta_uk(k)*( delta_uk(k) - 2.0d0*delx)/(delx**2)
+            term3 =  delta_uk(k)*( delta_uk(k) - delx)/(2.0d0*(delx**2))
+            !Boundary node velocities:
+            var_cy(k) = (var_ref1(k) - term2*var_ref2(k) + term3*var_ref3(k))/term1
+
         end do
-    end subroutine trapezoidal_sub
+
+    end subroutine interpolate_var_on_cylinder
 
     subroutine gaussian_smoothing(n_l,theta_l, p_l, p_smooth_l)
         implicit none
@@ -769,50 +707,6 @@ contains
         p_s = a0 + a1*rs + a2*(rs**2)
 
     end subroutine quadratic_interpolation
-
-    subroutine var_surface_interpolation(var_glb, var_cy)
-        implicit none
-        real(8), intent(in), dimension(1:nx, 1:ny) :: var_glb
-        real(8), intent(out), dimension(1:nbct) :: var_cy
-        real(8) :: term1,term2,term3
-        real(8) :: xd,yd,var_0,var_1
-        integer :: i,j,k
-
-        do k = 1,nbct
-            i = bou_i(k)
-            j = bou_j(k)
-
-            !First reference node: boundary point
-            var_ref1(k) = var_glb(i, j)
-
-            !Second reference node: First fluid point
-            xd = (x_ref2(k) - x(i_p2(1,k),j_p2(1,k)))/dx
-            yd = (y_ref2(k) - y(i_p2(1,k),j_p2(1,k)))/dy
-
-            var_0 = (1.0d0 - xd)*var_glb(i_p2(1,k),j_p2(1,k)) + xd*var_glb(i_p2(2,k),j_p2(2,k))
-            var_1 = (1.0d0 - xd)*var_glb(i_p2(3,k),j_p2(3,k)) + xd*var_glb(i_p2(4,k),j_p2(4,k))
-
-            var_ref2(k) =  (1.0d0 - yd)*var_0 + yd*var_1
-
-            !Third reference node: Second fluid point
-            xd = (x_ref3(k) - x(i_p3(1,k),j_p3(1,k)))/dx
-            yd = (y_ref3(k) - y(i_p3(1,k),j_p3(1,k)))/dy
-
-            var_0 = (1.0d0 - xd)*var_glb(i_p3(1,k),j_p3(1,k)) + xd*var_glb(i_p3(2,k),j_p3(2,k))
-            var_1 = (1.0d0 - xd)*var_glb(i_p3(3,k),j_p3(3,k)) + xd*var_glb(i_p3(4,k),j_p3(4,k))
-
-            var_ref3(k) =  (1.0d0 - yd)*var_0 + yd*var_1
-
-            !Variable interpolation: CYLINDER SURFACE
-            term1 = (2.0d0*delx*delx - (delta_uk(k)**2) + 3.0d0* delta_uk(k)*delx)/(2.0d0*(delx**2))
-            term2 =  delta_uk(k)*( delta_uk(k) - 2.0d0*delx)/(delx**2)
-            term3 =  delta_uk(k)*( delta_uk(k) - delx)/(2.0d0*(delx**2))
-            !Boundary node velocities:
-            var_cy(k) = (var_ref1(k) - term2*var_ref2(k) + term3*var_ref3(k))/term1
-
-        end do
-
-    end subroutine var_surface_interpolation
 
     subroutine velocity_interpolation_boundary_nodes()
         implicit none
@@ -1204,6 +1098,12 @@ contains
         do i = 1, nbct
             thetas_cy(i) = theta_c(idx(i))
         end do
+
+        open(unit=404, file='data_mean/theta.dat')
+        do i = 1, nbct
+            write(404,*) thetas_cy(i)
+        end do
+        close(404)
 
         !-----------------------------------------------------------------------------------------------
 

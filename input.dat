@@ -24,8 +24,8 @@
 	max_iter = 90000000
 	isave = 10000
 	irestart = 1
-	statsbegin =  270001
-	statsend = 293701
+	statsbegin =  290001
+	statsend = 310001
 	iplotstats = 1000
 	cycle_period = 2730
 
