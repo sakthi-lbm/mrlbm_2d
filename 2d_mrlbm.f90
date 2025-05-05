@@ -2,10 +2,11 @@ program lbm_2d
     implicit none
     ! Parameters
     real(8), parameter :: PI = 4.0d0*atan(1.0d0)
-    integer :: num_threads=4
+    integer :: num_threads
     integer :: nprocsx, nprocsy
     integer :: iplot, max_iter, isave, irestart, statsbegin,statsend, iplotstats, cycle_period
     integer :: restart_step = 1
+    real(8) :: start_time, end_time, wall_time, mlups
 
     !geometry and grid variables
     integer, allocatable,dimension(:,:) :: isfluid, issolid,isbound
@@ -31,7 +32,7 @@ program lbm_2d
     real(8) :: dx, dy, delx
     real(8), allocatable,dimension(:, :, :) :: cx_p, cy_p, Hxx_p,Hyy_p,Hxy_p
     integer, allocatable,dimension(:, :) :: e
-    real(8), allocatable,dimension(:, :, :) :: f, f_eq, f_tmp,fin,fout
+    real(8), allocatable,dimension(:, :, :) :: f, f_eq, f_tmp,fin,fout, freg
     real(8), allocatable, dimension(:, :) :: rho, p, ux, uy, mxx, myy, mxy,scalar
     real(8), allocatable, dimension(:, :) :: ux_prev, uy_prev
     real(8), allocatable, dimension(:) ::  cth_cyl, sth_cyl, cths_cyl, sths_cyl
@@ -52,18 +53,18 @@ program lbm_2d
     real(8), allocatable,dimension(:) :: theta_cy, p_cy, mxyp_cy, tw_cy
     real(8), allocatable,dimension(:) :: F_drag, F_lift
     real(8), allocatable,dimension(:) :: p_costheta, p_sintheta, tw_costheta, tw_sintheta
-    real(8) :: rho_inf_mean, p_inf_mean, rho_mean_counter
+    real(8) :: rho_inf_mean, rho_mean_counter
     real(8) :: F_drag_net, F_lift_net
     integer :: i, j, k, l, iter, coord_i,coord_j
     integer :: i_probe1, j_probe1, i_probe2, j_probe2, i_probe3, j_probe3, i_probe4, j_probe4
     integer :: unit_p = 301, unit_f = 302
 
     !logics
-    character (len=6) :: output_dir_name = 'output'//char(0)
-    character (len=7) :: restart_dir_name = 'restart'//char(0)
-    character (len=10) :: probe_dir_name = 'data_probe'//char(0)
-    character (len=8) :: geo_dir_name = 'data_geo'//char(0)
-    character (len=9) :: mean_dir_name = 'data_mean'//char(0)
+    character (len=6) :: output_dir_name = 'output'
+    character (len=7) :: restart_dir_name = 'restart'
+    character (len=10) :: probe_dir_name = 'data_probe'
+    character (len=8) :: geo_dir_name = 'data_geo'
+    character (len=9) :: mean_dir_name = 'data_mean'
     character(len=100) :: filename,filename_bin
     character (len=100) :: bc_type
     logical :: x_periodic, y_periodic, channel_with_cylinder,incomp,channel_with_square
@@ -217,10 +218,14 @@ program lbm_2d
     close(unit_p)
     open(unit=unit_f, file='data_mean/forces_time.dat', status='replace')
     close(unit_f)
+    open(unit=310, file='rho_mean_inlet.dat', status='replace')
+    close(310)
     
-
+    ! Start timer
+    
     ! Main loop
-  do iter = restart_step+1, max_iter
+call cpu_time(start_time)
+do iter = restart_step+1, max_iter
 
     !Macroscopic variables:
     !$omp parallel do private(i,j) shared( f, e, rho, p, ux, uy, mxx, myy, mxy)
@@ -297,8 +302,8 @@ program lbm_2d
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
             ! call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            ! call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            ! call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
     end if
@@ -346,11 +351,10 @@ program lbm_2d
     !Free-density: Mean inlet density
     rho_mean_counter = real(iter - (restart_step+1))
     rho_inf_mean = ((rho_mean_counter*rho_inf_mean) + rho(1,ny/2) )/(rho_mean_counter + 1.0d0)
-    p_inf_mean = rho_inf_mean/3.0d0
     
     if(mod(iter, 100)==0)then
         open(unit=310, file='rho_mean_inlet.dat', access='append')
-            write(310,*) iter, rho_inf_mean, p_inf_mean
+            write(310,*) iter, rho_inf_mean
         close(310)
     end if
 
@@ -375,6 +379,20 @@ program lbm_2d
             call write_function_plot3d(filename_bin)
         end if
     end if
+
+    !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
+    do i = 1, nx
+        do j = 1, ny
+            do k = 0, q-1
+                cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
+                freg(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
+                                 4.50d0*mxx(i, j)*Hxx(k) + &
+                                 4.50d0*myy(i, j)*Hyy(k) + &
+                                 9.00d0*mxy(i, j)*Hxy(k) )
+            end do
+        end do
+    end do
+    !$omp end parallel do
 
     !=============================================================================================================================
     !----------------------------------------------------------------------------------------------------	
@@ -485,10 +503,16 @@ program lbm_2d
         end do
     end if
 
-    call calculate_norm(ul2norm)
+    ! call calculate_norm(ul2norm)
 
-    if (mod(iter, 100) == 0) then 
-        write(*, *) "STEP: ",iter ,"     ", "VEL_NORM: ",  ul2norm 
+    if (mod(iter, 100) == 0) then
+        call cpu_time(end_time)
+        wall_time = end_time - start_time
+        mlups = (real(nx*ny) * real(iter)) / (1.0e6 * wall_time)
+        start_time = end_time
+
+        ! write(*, *) "STEP: ",iter ,"     ", "VEL_NORM: ",  ul2norm 
+        write(*, *) "STEP: ",iter ,"     ", "MAX_ux: ",  maxval(ux),"     ", "MLUPS: ",  mlups
     end if
 
 
@@ -497,7 +521,7 @@ program lbm_2d
     end if
 
 
- end do         !Main loop end
+end do         !Main loop end
 
 contains
 
@@ -523,8 +547,8 @@ contains
             end if
 
             if(Is(k)==1) then
-                Fx_inc  = Fx_inc + f(xi, yj, k)*e(k, 1)
-                Fy_inc  = Fy_inc + f(xi, yj, k)*e(k, 2)
+                Fx_inc  = Fx_inc + freg(xi, yj, k)*e(k, 1)
+                Fy_inc  = Fy_inc + freg(xi, yj, k)*e(k, 2)
             end if
         end do
 
@@ -536,7 +560,7 @@ contains
     subroutine write_statistics_out(step)
         implicit none
         integer, intent(in) :: step
-        integer :: i, j, k
+        integer :: k
 
         call extrapolate_var_on_cylinder(p, p_cy)
         ! call interpolate_var_on_cylinder(p, p_cy)
@@ -564,7 +588,7 @@ contains
         implicit none
         real(8),dimension(1:nx,1:ny),intent(in) :: var_glb
         real(8),dimension(1:nbct),intent(out) :: var_cy
-        real(8) :: x1,y1,var1,x2,y2,var2,x3,y3,var3,x4,y4,var4
+        real(8) :: x2,y2,var2,x3,y3,var3,x4,y4,var4
         real(8) :: xd,yd,var_0,var_1
         real(8) :: xs,ys,vars
         integer :: i,j,k
@@ -693,7 +717,7 @@ contains
         r1 = sqrt((x1**2) + (y1**2))
         r2 = sqrt((x2**2) + (y2**2))
         r3 = sqrt((x3**2) + (y3**2))
-        rs = sqrt((x_s**2) + (y_s**2))	
+        rs = sqrt((x_s**2) + (y_s**2))
 
         ! Step 1: Compute the coefficients a0, a1, a2 for the quadratic interpolation
         denom = (r1 - r2) * (r1 - r3) * (r2 - r3)
@@ -876,9 +900,9 @@ contains
         integer, dimension(0:q-1, 2) :: neigh
         integer :: flag0,flag1,flag2,flag3
         real, parameter :: epsilon = 0.5          ! Tolerance for boundary
-        integer :: i, j, k,l, cnt, i1,j1,i2,j2,i3,j3,i_temp,j_temp,ss,ee
-        real(8) :: thet,x_s,y_s,thet1,thet2,thet_mid,lambda,radi
-        real(8) :: xmid,ymid,epsi,delta_x,delta_y,rr,unit_nx,unit_ny,temp
+        integer :: i, j, k,l, cnt,ss,ee, temp
+        real(8) :: thet,x_s,y_s,radi
+        real(8) :: epsi,delta_x,delta_y,rr,unit_nx,unit_ny
 
         epsi = 0.2
         isfluid = 0
@@ -1136,7 +1160,7 @@ contains
                     write(10,*) x(i,j), y(i,j)
                 end if
             end do
-        end do	
+        end do
         close(10)
 
         open(unit=20, file='data_geo/data_geosolid.dat', status="replace")
@@ -1156,7 +1180,7 @@ contains
                     write(30,*) x(i,j), y(i,j)
                 end if
             end do
-        end do	
+        end do
         close(30)
 
     end subroutine get_coord
@@ -1183,16 +1207,14 @@ contains
         integer,intent(in) :: xi,yj
         character (len=100), intent(in) :: bc_type
         integer,dimension(0:q-1) :: Is,Os
-        real(8) :: rhoI_b,uxI_b,uyI_b,mxxI_b,myyI_b,mxyI_b
-        real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
+        real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
+        real(8) :: rho_prime_b
 
 
         SELECT CASE (bc_type)
         CASE ("outlet_bc")
             !Right wall (OUTLET):-------------------------------------------------------------------------------------------------------
             rhoI_b = 0.0d0
-            uxI_b = 0.0d0
-            uyI_b = 0.0d0
             mxxI_b = 0.0d0
             myyI_b = 0.0d0
             mxyI_b = 0.0d0
@@ -1203,30 +1225,21 @@ contains
             do k = 0, q-1
                 if(Is(k)==1) then
                     rhoI_b = rhoI_b + f(xi,yj,k)
-                    uxI_b = uxI_b + f(xi,yj,k)*e(k, 1)
-                    uyI_b = uyI_b + f(xi,yj,k)*e(k, 2)
                     mxxI_b = mxxI_b + f(xi,yj,k)*Hxx(k)
                     myyI_b = myyI_b + f(xi,yj,k)*Hyy(k)
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
 
-            uxI_b = uxI_b/rhoI_b
-            uyI_b = uyI_b/rhoI_b
             mxxI_b = mxxI_b/rhoI_b
             myyI_b = myyI_b/rhoI_b
             mxyI_b = mxyI_b/rhoI_b
 
-            rho_prime_b = rho(xi,yj)
-            !rho_prime_b = (4.0d0*rhoI_b + 3.0d0*rhoI_b*mxxI_b)/(3.0d0 + 3.0d0*ux(xi,yj))
-            Mxx_prime_b = (rho_prime_b + 9.0d0*rhoI_b*mxxI_b - 3.0d0*rho_prime_b*ux(xi,yj))/(6.0d0*rho_prime_b)
-            Myy_prime_b = 6.0d0*rhoI_b*myyI_b/(5.0d0*rho_prime_b)
-            Mxy_prime_b = (6.0d0*rhoI_b*mxyI_b - rho_prime_b*uy(xi,yj))/(3.0d0*rho_prime_b)
-
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
+            !rho(xi, yj) = (4.0d0*rhoI_b + 3.0d0*rhoI_b*mxxI_b)/(3.0d0 + 3.0d0*ux(xi,yj))
+            rho_prime_b = rho(xi, yj)
+            mxx(xi, yj) = (rho_prime_b + 9.0d0*rhoI_b*mxxI_b - 3.0d0*rho_prime_b*ux(xi,yj))/(6.0d0*rho_prime_b)
+            myy(xi, yj) = 6.0d0*rhoI_b*myyI_b/(5.0d0*rho_prime_b)
+            mxy(xi, yj) = (6.0d0*rhoI_b*mxyI_b - rho_prime_b*uy(xi,yj))/(3.0d0*rho_prime_b)
 
         CASE ("inlet_bc")
             rhoI_b = 0.0d0
@@ -1249,15 +1262,11 @@ contains
             myyI_b = myyI_b/rhoI_b
             mxyI_b = mxyI_b/rhoI_b
 
-            rho_prime_b = (4.0d0*rhoI_b + 3.0d0*rhoI_b*mxxI_b)/(3.0d0 - 3.0d0*ux(xi,yj)) 
-            Mxx_prime_b = (rho_prime_b + 9.0d0*rhoI_b*mxxI_b + 3.0d0*rho_prime_b*ux(xi,yj))/(6.0d0*rho_prime_b)
-            Myy_prime_b = 6.0d0*rhoI_b*myyI_b/(5.0d0*rho_prime_b)
-            Mxy_prime_b = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
-
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
+            rho(xi, yj) = (4.0d0*rhoI_b + 3.0d0*rhoI_b*mxxI_b)/(3.0d0 - 3.0d0*ux(xi,yj)) 
+            rho_prime_b = rho(xi, yj)
+            mxx(xi, yj) = (rho_prime_b + 9.0d0*rhoI_b*mxxI_b + 3.0d0*rho_prime_b*ux(xi,yj))/(6.0d0*rho_prime_b)
+            myy(xi, yj) = 6.0d0*rhoI_b*myyI_b/(5.0d0*rho_prime_b)
+            mxy(xi, yj) = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
 
         CASE ("topwall_bc")
             rhoI_b = 0.0d0
@@ -1269,7 +1278,7 @@ contains
             Os = (/ 1, 1, 0, 1, 1, 0, 0, 1, 1 /)
 
             do k = 0, q-1
-                if(Is(k)==1) then	
+                if(Is(k)==1) then
                     rhoI_b = rhoI_b + f(xi,yj,k)
                     mxxI_b = mxxI_b + f(xi,yj,k)*Hxx(k)
                     myyI_b = myyI_b + f(xi,yj,k)*Hyy(k)
@@ -1280,15 +1289,11 @@ contains
             myyI_b = myyI_b/rhoI_b
             mxyI_b = mxyI_b/rhoI_b
 
-            rho_prime_b = 3.0d0*rhoI_b*( 4.0d0 + 3.0d0*(1.0d0-omega)*myyI_b)/(9.0d0 + omega) 
-            Mxx_prime_b = 6.0d0*rhoI_b*mxxI_b/(5.0d0*rho_prime_b)
-            Myy_prime_b = (rho_prime_b + 9.0d0*rhoI_b*myyI_b)/(6.0d0*rho_prime_b)
-            Mxy_prime_b = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
-
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
+            rho(xi, yj) = 3.0d0*rhoI_b*( 4.0d0 + 3.0d0*(1.0d0-omega)*myyI_b)/(9.0d0 + omega) 
+            rho_prime_b = rho(xi, yj)
+            mxx(xi, yj) = 6.0d0*rhoI_b*mxxI_b/(5.0d0*rho_prime_b)
+            myy(xi, yj) = (rho_prime_b + 9.0d0*rhoI_b*myyI_b)/(6.0d0*rho_prime_b)
+            mxy(xi, yj) = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
 
         CASE ("bottomwall_bc")
             rhoI_b = 0.0d0
@@ -1300,7 +1305,7 @@ contains
             Os = (/ 1, 1, 1, 1, 0, 1, 1, 0, 0 /)
 
             do k = 0, q-1
-                if(Is(k)==1) then	
+                if(Is(k)==1) then
                     rhoI_b = rhoI_b + f(xi,yj,k)
                     mxxI_b = mxxI_b + f(xi,yj,k)*Hxx(k)
                     myyI_b = myyI_b + f(xi,yj,k)*Hyy(k)
@@ -1311,15 +1316,11 @@ contains
             myyI_b = myyI_b/rhoI_b
             mxyI_b = mxyI_b/rhoI_b
 
-            rho_prime_b = 3.0d0*rhoI_b*( 4.0d0 + 3.0d0*(1.0d0-omega)*myyI_b)/(9.0d0 + omega) 
-            Mxx_prime_b = 6.0d0*rhoI_b*mxxI_b/(5.0d0*rho_prime_b)
-            Myy_prime_b = (rho_prime_b + 9.0d0*rhoI_b*myyI_b)/(6.0d0*rho_prime_b)
-            Mxy_prime_b = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
-
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
+            rho(xi, yj) = 3.0d0*rhoI_b*( 4.0d0 + 3.0d0*(1.0d0-omega)*myyI_b)/(9.0d0 + omega) 
+            rho_prime_b = rho(xi, yj)
+            mxx(xi, yj) = 6.0d0*rhoI_b*mxxI_b/(5.0d0*rho_prime_b)
+            myy(xi, yj) = (rho_prime_b + 9.0d0*rhoI_b*myyI_b)/(6.0d0*rho_prime_b)
+            mxy(xi, yj) = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
 
         CASE DEFAULT
             print*,"Not a valid boundary type!!!!!!!"
@@ -1333,16 +1334,14 @@ contains
         integer,intent(in) :: xi,yj
         character (len=100), intent(in) :: bc_type
         integer,dimension(0:q-1) :: Is,Os
-        real(8) :: rhoI_b,uxI_b,uyI_b,mxxI_b,myyI_b,mxyI_b
-        real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
+        real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
+        real(8) :: rho_prime_b
 
 
         SELECT CASE (bc_type)
         CASE ("outlet_bc")
             !Right wall (OUTLET):-------------------------------------------------------------------------------------------------------
             rhoI_b = 0.0d0
-            uxI_b = 0.0d0
-            uyI_b = 0.0d0
             mxxI_b = 0.0d0
             myyI_b = 0.0d0
             mxyI_b = 0.0d0
@@ -1351,32 +1350,22 @@ contains
             Os = (/ 1, 0, 1, 1, 1, 0, 1, 1, 0 /)
 
             do k = 0, q-1
-                if(Is(k)==1) then	
+                if(Is(k)==1) then
                     rhoI_b = rhoI_b + f(xi,yj,k)
-                    uxI_b = uxI_b + f(xi,yj,k)*e(k, 1)
-                    uyI_b = uyI_b + f(xi,yj,k)*e(k, 2)
                     mxxI_b = mxxI_b + f(xi,yj,k)*Hxx(k)
                     myyI_b = myyI_b + f(xi,yj,k)*Hyy(k)
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
-
-            uxI_b = uxI_b/rhoI_b
-            uyI_b = uyI_b/rhoI_b
             mxxI_b = mxxI_b/rhoI_b
             myyI_b = myyI_b/rhoI_b
             mxyI_b = mxyI_b/rhoI_b
 
-            !rho_prime_b = 6.0d0*rhoI_b/(5.0d0 + 3.0d0*ux(xi,yj)- 3.0d0*(ux(xi,yj)**2))
-            rho_prime_b = rho(xi,yj)
-            Mxx_prime_b = ux(xi,yj)**2
-            Myy_prime_b = uy(xi,yj)**2
-            Mxy_prime_b = (6.0d0*rhoI_b*mxyI_b - rho_prime_b*uy(xi,yj))/(3.0d0*rho_prime_b)
-
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
+            !rho(xi, yj) = 6.0d0*rhoI_b/(5.0d0 + 3.0d0*ux(xi,yj)- 3.0d0*(ux(xi,yj)**2))
+            rho_prime_b = rho(xi, yj)
+            mxx(xi, yj) = ux(xi,yj)**2
+            myy(xi, yj) = uy(xi,yj)**2
+            mxy(xi, yj) = (6.0d0*rhoI_b*mxyI_b - rho_prime_b*uy(xi,yj))/(3.0d0*rho_prime_b)
 
         CASE ("inlet_bc")
             rhoI_b = 0.0d0
@@ -1399,16 +1388,12 @@ contains
             myyI_b = myyI_b/rhoI_b
             mxyI_b = mxyI_b/rhoI_b
 
-            rho_prime_b = 6.0d0*rhoI_b/(5.0d0 - 3.0d0*ux(xi,yj)- 3.0d0*(ux(xi,yj)**2)) 
-            Mxx_prime_b = ux(xi,yj)**2
-            Myy_prime_b = 0.0d0
-            Mxy_prime_b = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
+            rho(xi, yj) = 6.0d0*rhoI_b/(5.0d0 - 3.0d0*ux(xi,yj)- 3.0d0*(ux(xi,yj)**2)) 
+            rho_prime_b = rho(xi, yj)
+            mxx(xi, yj) = ux(xi,yj)**2
+            myy(xi, yj) = 0.0d0
+            mxy(xi, yj) = 2.0d0*rhoI_b*mxyI_b/rho_prime_b
 
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
-            
         CASE ("topwall_bc")
             rhoI_b = 0.0d0
             mxxI_b = 0.0d0
@@ -1430,15 +1415,10 @@ contains
             myyI_b = myyI_b/rhoI_b
             mxyI_b = mxyI_b/rhoI_b
 
-            rho_prime_b = 6.0d0*rhoI_b/5.0d0
-            Mxx_prime_b = 0.0d0
-            Myy_prime_b = 0.0d0
-            Mxy_prime_b = 5.0d0*mxyI_b/3.0d0
-
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
+            rho(xi, yj) = 6.0d0*rhoI_b/5.0d0
+            mxx(xi, yj) = 0.0d0
+            myy(xi, yj) = 0.0d0
+            mxy(xi, yj) = 5.0d0*mxyI_b/3.0d0
 
         CASE ("bottomwall_bc")
             rhoI_b = 0.0d0
@@ -1450,7 +1430,7 @@ contains
             Os = (/ 1, 1, 1, 1, 0, 1, 1, 0, 0 /)
 
             do k = 0, q-1
-                if(Is(k)==1) then	
+                if(Is(k)==1) then
                     rhoI_b = rhoI_b + f(xi,yj,k)
                     mxxI_b = mxxI_b + f(xi,yj,k)*Hxx(k)
                     myyI_b = myyI_b + f(xi,yj,k)*Hyy(k)
@@ -1461,15 +1441,10 @@ contains
             myyI_b = myyI_b/rhoI_b
             mxyI_b = mxyI_b/rhoI_b
 
-            rho_prime_b = 6.0d0*rhoI_b/5.0d0
-            Mxx_prime_b = 0.0d0
-            Myy_prime_b = 0.0d0
-            Mxy_prime_b = 5.0d0*mxyI_b/3.0d0
-
-            rho(xi, yj) = rho_prime_b
-            mxx(xi, yj) = Mxx_prime_b
-            myy(xi, yj) = Myy_prime_b
-            mxy(xi, yj) = Mxy_prime_b
+            rho(xi, yj) = 6.0d0*rhoI_b/5.0d0
+            mxx(xi, yj) = 0.0d0
+            myy(xi, yj) = 0.0d0
+            mxy(xi, yj) = 5.0d0*mxyI_b/3.0d0
 
         CASE DEFAULT
             print*,"Not a valid boundary type!!!!!!!"
@@ -1603,7 +1578,6 @@ contains
 
         b_coeff(1:3) = (/ R_xx, R_yy, R_xy /) 
 
-
         call solve_system(nvar_sys, A_coeff,b_coeff,Mxx_prime_b,Myy_prime_b,Mxy_prime_b)
 
         denominator = (1.0d0 - omega)*A_prime + (1.0d0 - omega)*(Mxx_prime_b*B11_prime + Myy_prime_b*B22_prime &
@@ -1623,8 +1597,6 @@ contains
         real(8),intent(in) :: uxp,uyp
         integer,dimension(0:q-1) :: Is,Os
         real(8),dimension(0:q-1) :: A_i,E_i, B11_i, B22_i, B12_i
-        real(8),dimension(1:3,1:3) :: A_coeff
-        real(8),dimension(1:3) :: b_coeff
         real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
         real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
         real(8) :: A_prime, E_prime, G_prime, B11_prime, B22_prime, B12_prime
@@ -1635,7 +1607,6 @@ contains
                     & J11_xy_star, J22_xy_star, J12_xy_star
         real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
         real(8) :: R_xx, R_yy, R_xy, denominator
-        integer :: nvar_sys = 3
 
 
         Is(0:q-1) = Incs_b(label,0:q-1)
@@ -1756,20 +1727,15 @@ contains
         integer,intent(in) :: xi,yj,label
         real(8),intent(in) :: uxp,uyp
         integer,dimension(0:q-1) :: Is,Os
-        real(8),dimension(0:q-1) :: A_i,E_i, B11_i, B22_i, B12_i
-        real(8),dimension(1:3,1:3) :: A_coeff
-        real(8),dimension(1:3) :: b_coeff
+        real(8),dimension(0:q-1) :: A_i, B11_i, B22_i, B12_i
         real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
         real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
-        real(8) :: A_prime, E_prime, G_prime, B11_prime, B22_prime, B12_prime
-        real(8) :: D_xx_prime, D_yy_prime, D_xy_prime, J11_prime, J22_prime, J12_prime
+        real(8) :: A_prime, E_prime, B11_prime, B22_prime, B12_prime
+        real(8) :: D_xx_prime, D_yy_prime, D_xy_prime
         real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
         real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
-        real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star, &
-                    & J11_xy_star, J22_xy_star, J12_xy_star
         real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
         real(8) :: R_xx, R_yy, R_xy, denominator
-        integer :: nvar_sys = 3
 
 
         Is(0:q-1) = Incs_b(label,0:q-1)
@@ -1867,20 +1833,14 @@ contains
         real(8),intent(in) :: uxp,uyp
         integer,dimension(0:q-1) :: Is,Os
         real(8),dimension(0:q-1) :: A_i,E_i, B11_i, B22_i, B12_i
-        real(8),dimension(1:3,1:3) :: A_coeff
-        real(8),dimension(1:3) :: b_coeff
         real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
         real(8) :: rho_prime_b,Mxx_prime_b,Myy_prime_b,Mxy_prime_b
-        real(8) :: A_prime, E_prime, G_prime, B11_prime, B22_prime, B12_prime
-        real(8) :: D_xx_prime, D_yy_prime, D_xy_prime, J11_prime, J22_prime, J12_prime
+        real(8) :: E_prime, B11_prime, B22_prime, B12_prime
+        real(8) :: D_xx_prime, D_yy_prime, D_xy_prime
         real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
         real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
-        real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star, &
-                    & J11_xy_star, J22_xy_star, J12_xy_star
         real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
-        real(8) :: R_xx, R_yy, R_xy, denominator
-        integer :: nvar_sys = 3
-
+        real(8) :: R_xx, R_yy, R_xy
 
         Is(0:q-1) = Incs_b(label,0:q-1)
         Os(0:q-1) = Outs_b(label,0:q-1)
@@ -1973,10 +1933,8 @@ contains
         real(8),dimension(1:nvar,1:nvar),intent(in) :: A_sys 
         real(8),dimension(1:nvar),intent(in) :: b_sys 
         real(8),intent(out) :: x_11,x_22,x_12
-
-        ! Define the variables
-        real :: a1, a2, a3, b1, b2, b3, c1, c2, c3, d1, d2, d3
-        real :: denom
+        real(8) :: a1, a2, a3, b1, b2, b3, c1, c2, c3, d1, d2, d3
+        real(8) :: denom
 
         !SYSTEM OF EQUATIONS
         !	eq1 = a1*mxx + b1*myy + c1*mxy - d1 == 0;
@@ -2054,10 +2012,7 @@ contains
         Incs_b(14,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 1, 1, 0 /)
         Outs_b(14,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 0, 1, 1 /)
 
-
     end subroutine finding_incoming_outgoing_pops
-
-
 
     subroutine create_output_dir_if_needed (dir_name, length)
         implicit none
@@ -2113,8 +2068,6 @@ contains
         integer :: i, j, l, m 
         integer :: nblocks,nprocs
         character(len=100), intent(in) :: filename
-        real(8),dimension(1:nx, 1:ny) ::  var_rho, var_ux, var_uy
-        real(8),dimension(1:nx, 1:ny) ::  var_mxxp, var_myyp, var_mxyp
 
         nprocs = 1
         nblocks = nprocs
@@ -2172,12 +2125,11 @@ contains
         implicit none
         integer :: input = 100
         integer :: iread_error = 0
-        integer :: i 
 
         namelist/DomainSize/nx,ny,lattice_type
         namelist/Cylinder/ncy,L_front,L_back,L_top,L_bot
         namelist/Numbers/Re
-        namelist/Parallel/nprocsx,nprocsy
+        namelist/Parallel/num_threads,nprocsx,nprocsy
         namelist/Controls/uo,rho_infty,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats, cycle_period
         namelist/LogicalControls/post_process, x_periodic,y_periodic,channel_with_cylinder,channel_with_square, &
             & incomp,vel_interp, mom_interp, rotated_coordinate
@@ -2233,6 +2185,7 @@ contains
         allocate(xvar(1:nx,1:ny),yvar(1:nx,1:ny))
         allocate(w(0:q-1),Hxx(0:q-1),Hyy(0:q-1),Hxy(0:q-1),Hxxy(0:q-1),Hxyy(0:q-1),Hxxyy(0:q-1))
         allocate(f(1:nx, 1:ny, 0:q-1), f_eq(1:nx, 1:ny, 0:q-1), f_tmp(1:nx, 1:ny, 0:q-1))
+        allocate(freg(1:nx, 1:ny, 0:q-1))
         allocate(fin(1:nx, 1:ny, 0:q-1),fout(1:nx, 1:ny, 0:q-1))
         allocate(rho(1:nx, 1:ny),p(1:nx, 1:ny), ux(1:nx, 1:ny), uy(1:nx, 1:ny))
         allocate(ux_prev(1:nx, 1:ny), uy_prev(1:nx, 1:ny))
@@ -2281,8 +2234,8 @@ contains
     subroutine create_master_p3d_file()
         implicit none
 
-        character(len=100) :: filename,filename_bin
-        integer(8) :: i,j,istart,iend,istep,iter
+        character(len=100) :: filename_bin
+        integer(8) :: istart,iend,iter
         integer(8) :: soln_time
         real(8) :: phy_time
 

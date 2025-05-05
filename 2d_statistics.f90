@@ -22,7 +22,6 @@ program statistics_calculation
     logical, parameter :: verbose = .true.
     integer :: i, j, k, mean_counter
 
-    n_cycle = 7
     unit=100
     count = 0
 
@@ -89,7 +88,11 @@ program statistics_calculation
         end do
     close(unit)
     call find_peaks(nstep, time, fl_signal, cycle_start_l, period_l)
-    
+
+    n_cycle = (nstep - cycle_start_l)/period_l
+    write(line, '(A,I0,A)') "Averging over ",n_cycle, " cycle(s)"
+    print *, trim(line)
+
     cycle_end_l = cycle_start_l + (n_cycle*period_l)
     !Strouhal number
     Str = D_cy/(period_l * uo)
@@ -170,6 +173,9 @@ program statistics_calculation
         write(unit,*) "Drag coefficinet (C_D)  ",":", Cd_avg
         write(unit,*) "Lift coefficinet (C_L ",":", Cl_avg
     close(unit)
+    write(*,*) "Strouhal number (St)  ",":", Str
+    write(*,*) "Drag coefficinet (C_D)  ",":", Cd_avg
+    write(*,*) "Lift coefficinet (C_L ",":", Cl_avg
 
 
 contains
@@ -241,7 +247,7 @@ subroutine read_input_file()
         write(*, *) 'Reading input_stat.dat file ...'
 
         read(input, parameters, iostat=iread_error, err=150)
-        write(*, 200) 'parameters'
+        ! write(*, 200) 'parameters'
 
     close(input)
 

@@ -4,8 +4,9 @@
 CODE_DIR="$(pwd)"                   # Current working directory
 EXECUTABLE="a.out"    # Change to your actual executable name
 INPUT_FILE="input.dat"              # If applicable, change or remove this
+INPUT_FILE2="input_stat.dat"              # If applicable, change or remove this
 CODE_FILE="2d_mrlbm.f90"                # Your Fortran code file
-CODE_FILE2="detect_vortex_cycle.f90"                # Your Fortran code file
+CODE_FILE2="2d_statistics.f90"                # Your Fortran code file
 BASE_DIR="$PWD/simulations"         # Base directory for all simulations
 RE_DIR="restart"
 #BASE_DIR="$PWD/simulations"         # Base directory for all simulations
@@ -31,7 +32,7 @@ cp "$CODE_DIR/$CODE_FILE" "$SIM_DIR/"    # Copy the specific Fortran code file (
 cp "$CODE_DIR/$CODE_FILE2" "$SIM_DIR/"    # Copy the specific Fortran code file (code.f90)
 #cp "$CODE_DIR/$EXECUTABLE" "$SIM_DIR/"   # Copy the executable
 cp -a "$RE_DIR" "$SIM_DIR/"
-[ -f "$CODE_DIR/$INPUT_FILE" ] && cp "$CODE_DIR/$INPUT_FILE" "$SIM_DIR/"  # Copy input file if it exists
+[ -f "$CODE_DIR/$INPUT_FILE" ] && cp "$CODE_DIR/$INPUT_FILE" "$SIM_DIR/"  && cp "$CODE_DIR/$INPUT_FILE2" "$SIM_DIR/"  # Copy input file if it exists
 
 # === OPEN NEW TERMINAL AND RUN SIMULATION ===
 gnome-terminal -- bash -c "cd '$SIM_DIR' && gfortran -fopenmp -O3 2d_mrlbm.f90 && ./$EXECUTABLE; exec bash"

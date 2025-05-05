@@ -13,19 +13,20 @@
 &Numbers
 	Re = 100
 /
-&Parallel 
-	  nprocsx = 1
-	  nprocsy = 1
+&Parallel
+	num_threads=12
+	nprocsx = 1
+	nprocsy = 1
 /
 &Controls
 	uo = 0.1
 	rho_infty = 1.19530
 	iplot = 1000
-	max_iter = 90000000
+	max_iter = 100
 	isave = 10000
-	irestart = 1
-	statsbegin =  290001
-	statsend = 310001
+	irestart = 0
+	statsbegin =  330001
+	statsend = 350001
 	iplotstats = 1000
 	cycle_period = 2730
 
