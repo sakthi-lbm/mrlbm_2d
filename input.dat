@@ -14,7 +14,7 @@
 	Re = 100
 /
 &Parallel
-	num_threads=12
+	num_threads=14
 	nprocsx = 1
 	nprocsy = 1
 /
@@ -40,4 +40,4 @@
 	incomp = .false.
 	vel_interp = .true.
 	mom_interp = .true.
-	rotated_coordinate = .true.
+	rotated_coordinate = .false.

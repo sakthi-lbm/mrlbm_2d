@@ -28,7 +28,7 @@ program lbm_2d
     real(8), parameter :: rho0 = 1.0
     real(8) :: Re,uo,rho_infty, p_infty,nu,omega, uinlet,vinlet
     real(8), allocatable,dimension(:) :: w,Hxx,Hyy,Hxy,Hxxy,Hxyy,Hxxyy
-    real(8) :: cu
+    real(8) :: cu, cs2, inv_rho
     real(8) :: dx, dy, delx
     real(8), allocatable,dimension(:, :, :) :: cx_p, cy_p, Hxx_p,Hyy_p,Hxy_p
     integer, allocatable,dimension(:, :) :: e
@@ -150,6 +150,7 @@ program lbm_2d
     delt_phy = (delx_phy**2)*nu_lat/nu_phy
 
     p_infty = rho_infty/3.0d0
+    cs2 = 1.0d0/3.0d0
 
     call create_master_p3d_file()
 
@@ -168,12 +169,12 @@ program lbm_2d
 
     ! Second-order Hermite polynomial 
     do k = 0, q-1
-        Hxx(k) = e(k, 1)*e(k, 1) - (1.0d0/3.0d0)    !Hxx
-        Hyy(k) = e(k, 2)*e(k, 2) - (1.0d0/3.0d0)    !Hyy
+        Hxx(k) = e(k, 1)*e(k, 1) - cs2    !Hxx
+        Hyy(k) = e(k, 2)*e(k, 2) - cs2    !Hyy
         Hxy(k) = e(k, 1)*e(k, 2)                    !Hxy
-        Hxxy(k) = (e(k, 1)*e(k, 1) - (1.0d0/3.0d0))*e(k, 2)                                 !Hxxy
-        Hxyy(k) = (e(k, 2)*e(k, 2) - (1.0d0/3.0d0))*e(k, 1)                                 !Hxxy
-        Hxxyy(k) = (e(k, 1)*e(k, 1) - (1.0d0/3.0d0))*(e(k, 2)*e(k, 2) - (1.0d0/3.0d0))      !Hxxy
+        Hxxy(k) = (e(k, 1)*e(k, 1) - cs2)*e(k, 2)                                 !Hxxy
+        Hxyy(k) = (e(k, 2)*e(k, 2) - cs2)*e(k, 1)                                 !Hxxy
+        Hxxyy(k) = (e(k, 1)*e(k, 1) - cs2)*(e(k, 2)*e(k, 2) - cs2)      !Hxxy
     end do
 
     ! Lattice Velocities and Second-order Hermite polynomial in rotated coordinates
@@ -232,12 +233,13 @@ do iter = restart_step+1, max_iter
     do i = 1, nx
         do j = 1, ny
             rho(i, j) = sum(f(i, j, :))
-            p(i, j) = rho(i, j)/3.0d0
-            ux(i, j) = sum(f(i, j, :) * e(:, 1)) / rho(i, j)
-            uy(i, j) = sum(f(i, j, :) * e(:, 2)) / rho(i, j)
-            mxx(i, j) =  sum(f(i, j, :) * Hxx(:)) / rho(i, j)
-            myy(i, j) =  sum(f(i, j, :) * Hyy(:)) / rho(i, j)
-            mxy(i, j) =  sum(f(i, j, :) * Hxy(:)) / rho(i, j)
+            inv_rho = 1.0d0 / rho(i, j)
+            p(i, j) = rho(i, j) * cs2
+            ux(i, j) = sum(f(i, j, :) * e(:, 1)) * inv_rho
+            uy(i, j) = sum(f(i, j, :) * e(:, 2)) * inv_rho
+            mxx(i, j) =  sum(f(i, j, :) * Hxx(:)) * inv_rho
+            myy(i, j) =  sum(f(i, j, :) * Hyy(:)) * inv_rho
+            mxy(i, j) =  sum(f(i, j, :) * Hxy(:)) * inv_rho
         end do
     end do
     !$omp end parallel do
@@ -277,7 +279,7 @@ do iter = restart_step+1, max_iter
 
     if(channel_with_cylinder .and. (.not. rotated_coordinate)) then
         !velocity interpolation for curved boundary: 
-        if(vel_interp) call velocity_interpolation_boundary_nodes()
+        call velocity_interpolation_boundary_nodes()
 
         do l = 1,nbct
             i = bou_i(l)
@@ -301,8 +303,8 @@ do iter = restart_step+1, max_iter
             !!Rotated coordinate system
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            ! call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            ! call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
             ! call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
@@ -380,19 +382,19 @@ do iter = restart_step+1, max_iter
         end if
     end if
 
-    !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
-    do i = 1, nx
-        do j = 1, ny
-            do k = 0, q-1
-                cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
-                freg(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
-                                 4.50d0*mxx(i, j)*Hxx(k) + &
-                                 4.50d0*myy(i, j)*Hyy(k) + &
-                                 9.00d0*mxy(i, j)*Hxy(k) )
-            end do
-        end do
-    end do
-    !$omp end parallel do
+    ! !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
+    ! do i = 1, nx
+    !     do j = 1, ny
+    !         do k = 0, q-1
+    !             cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
+    !             freg(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
+    !                              4.50d0*mxx(i, j)*Hxx(k) + &
+    !                              4.50d0*myy(i, j)*Hyy(k) + &
+    !                              9.00d0*mxy(i, j)*Hxy(k) )
+    !         end do
+    !     end do
+    ! end do
+    ! !$omp end parallel do
 
     !=============================================================================================================================
     !----------------------------------------------------------------------------------------------------	
@@ -547,8 +549,8 @@ contains
             end if
 
             if(Is(k)==1) then
-                Fx_inc  = Fx_inc + freg(xi, yj, k)*e(k, 1)
-                Fy_inc  = Fy_inc + freg(xi, yj, k)*e(k, 2)
+                Fx_inc  = Fx_inc + f(xi, yj, k)*e(k, 1)
+                Fy_inc  = Fy_inc + f(xi, yj, k)*e(k, 2)
             end if
         end do
 
@@ -1208,7 +1210,7 @@ contains
         character (len=100), intent(in) :: bc_type
         integer,dimension(0:q-1) :: Is,Os
         real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
-        real(8) :: rho_prime_b
+        real(8) :: rho_prime_b, inv_rhoIb
 
 
         SELECT CASE (bc_type)
@@ -1231,9 +1233,10 @@ contains
                 end if
             end do
 
-            mxxI_b = mxxI_b/rhoI_b
-            myyI_b = myyI_b/rhoI_b
-            mxyI_b = mxyI_b/rhoI_b
+            inv_rhoIb = 1.0d0/rhoI_b
+            mxxI_b = mxxI_b * inv_rhoIb
+            myyI_b = myyI_b * inv_rhoIb
+            mxyI_b = mxyI_b * inv_rhoIb
 
             !rho(xi, yj) = (4.0d0*rhoI_b + 3.0d0*rhoI_b*mxxI_b)/(3.0d0 + 3.0d0*ux(xi,yj))
             rho_prime_b = rho(xi, yj)
@@ -1258,9 +1261,10 @@ contains
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
-            mxxI_b = mxxI_b/rhoI_b
-            myyI_b = myyI_b/rhoI_b
-            mxyI_b = mxyI_b/rhoI_b
+            inv_rhoIb = 1.0d0/rhoI_b
+            mxxI_b = mxxI_b * inv_rhoIb
+            myyI_b = myyI_b * inv_rhoIb
+            mxyI_b = mxyI_b * inv_rhoIb
 
             rho(xi, yj) = (4.0d0*rhoI_b + 3.0d0*rhoI_b*mxxI_b)/(3.0d0 - 3.0d0*ux(xi,yj)) 
             rho_prime_b = rho(xi, yj)
@@ -1285,9 +1289,10 @@ contains
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
-            mxxI_b = mxxI_b/rhoI_b
-            myyI_b = myyI_b/rhoI_b
-            mxyI_b = mxyI_b/rhoI_b
+            inv_rhoIb = 1.0d0/rhoI_b
+            mxxI_b = mxxI_b * inv_rhoIb
+            myyI_b = myyI_b * inv_rhoIb
+            mxyI_b = mxyI_b * inv_rhoIb
 
             rho(xi, yj) = 3.0d0*rhoI_b*( 4.0d0 + 3.0d0*(1.0d0-omega)*myyI_b)/(9.0d0 + omega) 
             rho_prime_b = rho(xi, yj)
@@ -1312,9 +1317,10 @@ contains
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
-            mxxI_b = mxxI_b/rhoI_b
-            myyI_b = myyI_b/rhoI_b
-            mxyI_b = mxyI_b/rhoI_b
+            inv_rhoIb = 1.0d0/rhoI_b
+            mxxI_b = mxxI_b * inv_rhoIb
+            myyI_b = myyI_b * inv_rhoIb
+            mxyI_b = mxyI_b * inv_rhoIb
 
             rho(xi, yj) = 3.0d0*rhoI_b*( 4.0d0 + 3.0d0*(1.0d0-omega)*myyI_b)/(9.0d0 + omega) 
             rho_prime_b = rho(xi, yj)
@@ -1335,7 +1341,7 @@ contains
         character (len=100), intent(in) :: bc_type
         integer,dimension(0:q-1) :: Is,Os
         real(8) :: rhoI_b,mxxI_b,myyI_b,mxyI_b
-        real(8) :: rho_prime_b
+        real(8) :: rho_prime_b, inv_rhoIb
 
 
         SELECT CASE (bc_type)
@@ -1357,9 +1363,10 @@ contains
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
-            mxxI_b = mxxI_b/rhoI_b
-            myyI_b = myyI_b/rhoI_b
-            mxyI_b = mxyI_b/rhoI_b
+            inv_rhoIb = 1.0d0/rhoI_b
+            mxxI_b = mxxI_b * inv_rhoIb
+            myyI_b = myyI_b * inv_rhoIb
+            mxyI_b = mxyI_b * inv_rhoIb
 
             !rho(xi, yj) = 6.0d0*rhoI_b/(5.0d0 + 3.0d0*ux(xi,yj)- 3.0d0*(ux(xi,yj)**2))
             rho_prime_b = rho(xi, yj)
@@ -1384,9 +1391,10 @@ contains
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
-            mxxI_b = mxxI_b/rhoI_b
-            myyI_b = myyI_b/rhoI_b
-            mxyI_b = mxyI_b/rhoI_b
+            inv_rhoIb = 1.0d0/rhoI_b
+            mxxI_b = mxxI_b * inv_rhoIb
+            myyI_b = myyI_b * inv_rhoIb
+            mxyI_b = mxyI_b * inv_rhoIb
 
             rho(xi, yj) = 6.0d0*rhoI_b/(5.0d0 - 3.0d0*ux(xi,yj)- 3.0d0*(ux(xi,yj)**2)) 
             rho_prime_b = rho(xi, yj)
@@ -1411,9 +1419,10 @@ contains
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
-            mxxI_b = mxxI_b/rhoI_b
-            myyI_b = myyI_b/rhoI_b
-            mxyI_b = mxyI_b/rhoI_b
+            inv_rhoIb = 1.0d0/rhoI_b
+            mxxI_b = mxxI_b * inv_rhoIb
+            myyI_b = myyI_b * inv_rhoIb
+            mxyI_b = mxyI_b * inv_rhoIb
 
             rho(xi, yj) = 6.0d0*rhoI_b/5.0d0
             mxx(xi, yj) = 0.0d0
@@ -1437,9 +1446,10 @@ contains
                     mxyI_b = mxyI_b + f(xi,yj,k)*Hxy(k)
                 end if
             end do
-            mxxI_b = mxxI_b/rhoI_b
-            myyI_b = myyI_b/rhoI_b
-            mxyI_b = mxyI_b/rhoI_b
+            inv_rhoIb = 1.0d0/rhoI_b
+            mxxI_b = mxxI_b * inv_rhoIb
+            myyI_b = myyI_b * inv_rhoIb
+            mxyI_b = mxyI_b * inv_rhoIb
 
             rho(xi, yj) = 6.0d0*rhoI_b/5.0d0
             mxx(xi, yj) = 0.0d0
@@ -1470,7 +1480,7 @@ contains
         real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star,&
                     & J11_xy_star, J22_xy_star, J12_xy_star
         real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
-        real(8) :: R_xx, R_yy, R_xy, denominator
+        real(8) :: R_xx, R_yy, R_xy, denominator, inv_rhoIb
         integer :: nvar_sys = 3
 
 
@@ -1534,9 +1544,10 @@ contains
             end if
         end do
 
-        mxxI_b = mxxI_b/rhoI_b
-        myyI_b = myyI_b/rhoI_b
-        mxyI_b = mxyI_b/rhoI_b
+        inv_rhoIb = 1.0d0/rhoI_b
+        mxxI_b = mxxI_b * inv_rhoIb
+        myyI_b = myyI_b * inv_rhoIb
+        mxyI_b = mxyI_b * inv_rhoIb
 
         G_prime = (1.0d0 - omega)*A_prime + omega*E_prime
 
@@ -1606,7 +1617,7 @@ contains
         real(8) :: J11_xx_star, J22_xx_star, J12_xx_star, J11_yy_star, J22_yy_star, J12_yy_star, &
                     & J11_xy_star, J22_xy_star, J12_xy_star
         real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
-        real(8) :: R_xx, R_yy, R_xy, denominator
+        real(8) :: R_xx, R_yy, R_xy, denominator, inv_rhoIb
 
 
         Is(0:q-1) = Incs_b(label,0:q-1)
@@ -1669,9 +1680,10 @@ contains
             end if
         end do
 
-        mxxI_b = mxxI_b/rhoI_b
-        myyI_b = myyI_b/rhoI_b
-        mxyI_b = mxyI_b/rhoI_b
+        inv_rhoIb = 1.0d0/rhoI_b
+        mxxI_b = mxxI_b * inv_rhoIb
+        myyI_b = myyI_b * inv_rhoIb
+        mxyI_b = mxyI_b * inv_rhoIb
 
         G_prime = (1.0d0 - omega)*A_prime + omega*E_prime
 
@@ -1735,7 +1747,7 @@ contains
         real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
         real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
         real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
-        real(8) :: R_xx, R_yy, R_xy, denominator
+        real(8) :: R_xx, R_yy, R_xy, denominator, inv_rhoIb
 
 
         Is(0:q-1) = Incs_b(label,0:q-1)
@@ -1793,9 +1805,10 @@ contains
             end if
         end do
 
-        mxxI_b = mxxI_b/rhoI_b
-        myyI_b = myyI_b/rhoI_b
-        mxyI_b = mxyI_b/rhoI_b
+        inv_rhoIb = 1.0d0/rhoI_b
+        mxxI_b = mxxI_b * inv_rhoIb
+        myyI_b = myyI_b * inv_rhoIb
+        mxyI_b = mxyI_b * inv_rhoIb
 
         L_11_xx = B11_prime * mxxI_b - F11_xx_prime
         L_11_yy = B11_prime * myyI_b - F11_yy_prime
@@ -1840,7 +1853,7 @@ contains
         real(8) :: F11_xx_prime, F12_xx_prime, F22_xx_prime, F11_yy_prime, F12_yy_prime, F22_yy_prime
         real(8) :: F11_xy_prime, F12_xy_prime, F22_xy_prime
         real(8) :: L_11_xx, L_22_xx, L_12_xx, L_11_yy, L_22_yy, L_12_yy, L_11_xy, L_22_xy, L_12_xy
-        real(8) :: R_xx, R_yy, R_xy
+        real(8) :: R_xx, R_yy, R_xy, inv_rhoIb
 
         Is(0:q-1) = Incs_b(label,0:q-1)
         Os(0:q-1) = Outs_b(label,0:q-1)
@@ -1894,9 +1907,10 @@ contains
             end if
         end do
 
-        mxxI_b = mxxI_b/rhoI_b
-        myyI_b = myyI_b/rhoI_b
-        mxyI_b = mxyI_b/rhoI_b
+        inv_rhoIb = 1.0d0/rhoI_b
+        mxxI_b = mxxI_b * inv_rhoIb
+        myyI_b = myyI_b * inv_rhoIb
+        mxyI_b = mxyI_b * inv_rhoIb
 
         L_11_xx = F11_xx_prime
         L_11_yy = F11_yy_prime
