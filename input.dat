@@ -22,11 +22,11 @@
 	uo = 0.1
 	rho_infty = 1.19530
 	iplot = 1000
-	max_iter = 100
+	max_iter = 900000000
 	isave = 10000
-	irestart = 0
-	statsbegin =  330001
-	statsend = 350001
+	irestart = 1
+	statsbegin =  350001
+	statsend = 390001
 	iplotstats = 1000
 	cycle_period = 2730
 
@@ -37,7 +37,11 @@
 	y_periodic = .true.
 	channel_with_cylinder = .true.
 	channel_with_square = .false.
-	incomp = .false.
+	incomp_bc = .false.
+	incomp_bulk = .true.
 	vel_interp = .true.
 	mom_interp = .true.
-	rotated_coordinate = .false.
+	rotated_coordinate = .true.
+	strong_mass_bc = .true.
+	eq_mass_bc = .false.
+	weak_mass_bc = .false.

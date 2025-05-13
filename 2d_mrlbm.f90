@@ -39,6 +39,7 @@ program lbm_2d
     real(8), allocatable, dimension(:, :) ::  cth_glb, sth_glb, c2th_glb, s2th_glb
     real(8), allocatable, dimension(:) :: uxp_b, uyp_b
     real(8), allocatable, dimension(:,:) :: mxxp, myyp, mxyp
+    real(8), allocatable, dimension(:,:) :: mxx_s, myy_s, mxy_s
 
     !Statistics variables
     real(8), allocatable,dimension(:) :: theta_c,p_mean_cy, tw_mean_cy,radii,xb,yb,delta_uk,pb,p_fit, tw_fit
@@ -67,11 +68,12 @@ program lbm_2d
     character (len=9) :: mean_dir_name = 'data_mean'
     character(len=100) :: filename,filename_bin
     character (len=100) :: bc_type
-    logical :: x_periodic, y_periodic, channel_with_cylinder,incomp,channel_with_square
+    logical :: x_periodic, y_periodic, channel_with_cylinder,incomp_bc,incomp_bulk,channel_with_square
     logical :: vel_interp, mom_interp, rotated_coordinate, post_process
+    logical :: strong_mass_bc, eq_mass_bc, weak_mass_bc
     logical, parameter :: verbose = .true.
 
-    !$ call omp_set_num_threads(num_threads)
+    
 
     call create_output_dir_if_needed(output_dir_name,6)
     call create_output_dir_if_needed(restart_dir_name,7)
@@ -176,6 +178,8 @@ program lbm_2d
         Hxyy(k) = (e(k, 2)*e(k, 2) - cs2)*e(k, 1)                                 !Hxxy
         Hxxyy(k) = (e(k, 1)*e(k, 1) - cs2)*(e(k, 2)*e(k, 2) - cs2)      !Hxxy
     end do
+
+    !$ call omp_set_num_threads(num_threads)
 
     ! Lattice Velocities and Second-order Hermite polynomial in rotated coordinates
     !$omp parallel do collapse(2) private(i, j, k) shared(e, cth_glb, sth_glb, c2th_glb, s2th_glb,  &
@@ -303,9 +307,9 @@ do iter = restart_step+1, max_iter
             !!Rotated coordinate system
             uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
             uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            ! call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            ! call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            if(strong_mass_bc) call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            if(eq_mass_bc) call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            if(weak_mass_bc) call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
         end do
 
     end if
@@ -315,8 +319,8 @@ do iter = restart_step+1, max_iter
             bc_type = "outlet_bc"
             coord_i = nx
             coord_j = j
-            if (incomp) call apply_bc_incomp(coord_i,coord_j,bc_type)
-            if (.not. incomp) call apply_bc(coord_i,coord_j,bc_type)
+            if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
+            if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
         end do
     end if
 
@@ -325,8 +329,8 @@ do iter = restart_step+1, max_iter
             bc_type = "inlet_bc"
             coord_i = 1
             coord_j = j
-            if (incomp) call apply_bc_incomp(coord_i,coord_j,bc_type)
-            if (.not. incomp) call apply_bc(coord_i,coord_j,bc_type)
+            if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
+            if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
         end do
     end if
 
@@ -335,8 +339,8 @@ do iter = restart_step+1, max_iter
             bc_type = "topwall_bc"
             coord_i = i
             coord_j = ny
-            if (incomp) call apply_bc_incomp(coord_i,coord_j,bc_type)
-            if (.not. incomp) call apply_bc(coord_i,coord_j,bc_type)
+            if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
+            if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
         end do
     end if
 
@@ -345,8 +349,8 @@ do iter = restart_step+1, max_iter
             bc_type = "bottomwall_bc"
             coord_i = i
             coord_j = 1
-            if (incomp) call apply_bc_incomp(coord_i,coord_j,bc_type)
-            if (.not. incomp) call apply_bc(coord_i,coord_j,bc_type)
+            if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
+            if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
         end do
     end if
 
@@ -410,23 +414,49 @@ do iter = restart_step+1, max_iter
     end do
     !$omp end parallel do
     !----------------------------------------------------------------------------------------------------	
-    !Kinetic Projection / Regularization (using modified moments)
+    !Incompressible condition for trace of moments tensor
     !----------------------------------------------------------------------------------------------------	
-    !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
-    do i = 1, nx
-        do j = 1, ny
-            do k = 0, q-1
-                cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
-                fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
-                                 4.50d0*mxx(i, j)*Hxx(k) + &
-                                 4.50d0*myy(i, j)*Hyy(k) + &
-                                 9.00d0*mxy(i, j)*Hxy(k) )
+    if(incomp_bulk) then
+        !$omp parallel do collapse(2) shared(mxx, myy, mxy, ux, uy, omega, mxx_s, myy_s, mxy_s) private(i, j)
+        do i = 1, nx
+            do j = 1, ny 
+                mxx_s(i, j) =  mxx(i, j) - (0.50d0*(mxx(i, j) + myy(i, j) - ux(i, j)*ux(i, j) - uy(i, j)*uy(i, j)))
+                myy_s(i, j) =  myy(i, j) - (0.50d0*(mxx(i, j) + myy(i, j) - ux(i, j)*ux(i, j) - uy(i, j)*uy(i, j)))
+                mxy_s(i, j) =  mxy(i, j)
             end do
         end do
-    end do
-    !$omp end parallel do
+        !$omp end parallel do
 
-    !=============================================================================================================
+        !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
+        do i = 1, nx
+            do j = 1, ny
+                do k = 0, q-1
+                    cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
+                    fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
+                                    4.50d0*mxx_s(i, j)*Hxx(k) + &
+                                    4.50d0*myy_s(i, j)*Hyy(k) + &
+                                    9.00d0*mxy_s(i, j)*Hxy(k) )
+                end do
+            end do
+        end do
+        !$omp end parallel do
+    else
+        !Kinetic Projection / Regularization (using modified moments)
+        !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
+        do i = 1, nx
+            do j = 1, ny
+                do k = 0, q-1
+                    cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
+                    fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
+                                    4.50d0*mxx(i, j)*Hxx(k) + &
+                                    4.50d0*myy(i, j)*Hyy(k) + &
+                                    9.00d0*mxy(i, j)*Hxy(k) )
+                end do
+            end do
+        end do
+        !$omp end parallel do
+    end if
+    !----------------------------------------------------------------------------------------------------	
     !writing output files and statistics:
     if(post_process) then
         if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
@@ -510,7 +540,7 @@ do iter = restart_step+1, max_iter
     if (mod(iter, 100) == 0) then
         call cpu_time(end_time)
         wall_time = end_time - start_time
-        mlups = (real(nx*ny) * real(iter)) / (1.0e6 * wall_time)
+        mlups = (real(nx*ny) * 100.0) / (1.0e6 * wall_time)
         start_time = end_time
 
         ! write(*, *) "STEP: ",iter ,"     ", "VEL_NORM: ",  ul2norm 
@@ -2146,7 +2176,7 @@ contains
         namelist/Parallel/num_threads,nprocsx,nprocsy
         namelist/Controls/uo,rho_infty,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats, cycle_period
         namelist/LogicalControls/post_process, x_periodic,y_periodic,channel_with_cylinder,channel_with_square, &
-            & incomp,vel_interp, mom_interp, rotated_coordinate
+            & incomp_bc,incomp_bulk,vel_interp, mom_interp, rotated_coordinate, strong_mass_bc, eq_mass_bc, weak_mass_bc
 
         300 format("Error while reading input.dat file...")
         150 if (iread_error .ne. 0) then 
@@ -2212,6 +2242,7 @@ contains
         allocate(c2th_glb(1:nx, 1:ny),s2th_glb(1:nx, 1:ny))
         allocate(cx_p(1:nx, 1:ny, 0:q-1), cy_p(1:nx, 1:ny, 0:q-1))
         allocate(Hxx_p(1:nx, 1:ny, 0:q-1), Hyy_p(1:nx, 1:ny, 0:q-1), Hxy_p(1:nx, 1:ny, 0:q-1))
+        allocate(mxx_s(1:nx, 1:ny), myy_s(1:nx, 1:ny), mxy_s(1:nx, 1:ny))
 
     end subroutine allocate_memory
 
