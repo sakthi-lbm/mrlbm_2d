@@ -463,11 +463,6 @@ do iter = restart_step+1, max_iter
         if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
         if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
 
-        if(iter == statsend) close(101)
-        if(iter == statsend) close(102)
-        if(iter == statsend) close(103)
-
-
         !Statistics
         !=======================================================================================================
 
@@ -499,6 +494,10 @@ do iter = restart_step+1, max_iter
             close(unit_f)
 
         end if
+
+        if(iter == statsend) close(101)
+        if(iter == statsend) close(102)
+        if(iter == statsend) close(103)
 
     end if      !write output condition
     !=============================================================================================================
