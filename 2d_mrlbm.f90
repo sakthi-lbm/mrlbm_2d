@@ -3,8 +3,7 @@ program lbm_2d
     ! Parameters
     real(8), parameter :: PI = 4.0d0*atan(1.0d0)
     integer :: num_threads
-    integer :: nprocsx, nprocsy
-    integer :: iplot, max_iter, isave, irestart, statsbegin,statsend, iplotstats, cycle_period
+    integer :: iplot, max_iter, isave, irestart, statsbegin,statsend, iplotstats
     integer :: restart_step = 1
     real(8) :: start_time, end_time, wall_time, mlups
 
@@ -31,7 +30,6 @@ program lbm_2d
     real(8) :: cu, cs2, inv_rho
     real(8) :: dx, dy, delx
     real(8), allocatable,dimension(:, :, :) :: cx_p, cy_p, Hxx_p,Hyy_p,Hxy_p
-    integer, allocatable,dimension(:, :) :: e
     real(8), allocatable,dimension(:, :, :) :: f, f_eq, f_tmp,fin,fout, freg
     real(8), allocatable, dimension(:, :) :: rho, p, ux, uy, mxx, myy, mxy,scalar
     real(8), allocatable, dimension(:, :) :: ux_prev, uy_prev
@@ -40,6 +38,7 @@ program lbm_2d
     real(8), allocatable, dimension(:) :: uxp_b, uyp_b
     real(8), allocatable, dimension(:,:) :: mxxp, myyp, mxyp
     real(8), allocatable, dimension(:,:) :: mxx_s, myy_s, mxy_s
+    integer, allocatable,dimension(:, :) :: e
 
     !Statistics variables
     real(8), allocatable,dimension(:) :: theta_c,p_mean_cy, tw_mean_cy,radii,xb,yb,delta_uk,pb,p_fit, tw_fit
@@ -49,7 +48,7 @@ program lbm_2d
     real(8), allocatable,dimension(:) :: mxxp_ref1,mxxp_ref2,mxxp_ref3,mxxp_ref4
     real(8), allocatable,dimension(:) :: myyp_ref1,myyp_ref2,myyp_ref3,myyp_ref4
     integer, allocatable,dimension(:,:) :: i_p2,j_p2,i_p3,j_p3,i_p4,j_p4
-    integer, allocatable,dimension(:,:) :: Incs_b, Outs_b
+    integer, allocatable,dimension(:,:) :: Incs_b, Outs_b, Incs_f, Outs_f
     real(8), allocatable,dimension(:) :: thetas_cy, ps_cy, mxyps_cy, tws_cy
     real(8), allocatable,dimension(:) :: theta_cy, p_cy, mxyp_cy, tw_cy
     real(8), allocatable,dimension(:) :: F_drag, F_lift
@@ -75,11 +74,11 @@ program lbm_2d
 
     
 
-    call create_output_dir_if_needed(output_dir_name,6)
-    call create_output_dir_if_needed(restart_dir_name,7)
-    call create_output_dir_if_needed(probe_dir_name,10)
-    call create_output_dir_if_needed(geo_dir_name,8)
-    call create_output_dir_if_needed(mean_dir_name,9)
+    ! call create_output_dir_if_needed(output_dir_name,6)
+    ! call create_output_dir_if_needed(restart_dir_name,7)
+    ! call create_output_dir_if_needed(probe_dir_name,10)
+    ! call create_output_dir_if_needed(geo_dir_name,8)
+    ! call create_output_dir_if_needed(mean_dir_name,9)
 
     call read_input_file()
 
@@ -124,17 +123,16 @@ program lbm_2d
 
     !Flow constants: 
     uinlet  = uo         !Inlet axial velocity
-    vinlet  = 0.0d0     !inlet radial velocity 
+    vinlet  = 0.0d0      !inlet radial velocity 
 
     ! Lattice weights and velocity sets
     w(0:q-1) = (/ 16.0/36.0, 4.0/36.0, 4.0/36.0, 4.0/36.0, 4.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0, 1.0/36.0 /)  !w_k
     e(0:q-1, 1) = (/ 0, 1, 0, -1, 0, 1, -1, -1, 1 /)    !cx
     e(0:q-1, 2) = (/ 0, 0, 1, 0, -1, 1, 1, -1, -1 /)    !cy
 
-
-    nu    = uinlet * (ny-1)/Re
-    if (channel_with_cylinder) nu    = uinlet *(2.0d0*r_cyl)/Re;    !kinematic viscosity 
-    omega = 1.0d0/((3.0*nu)+(1.0d0/2.0d0)) !relaxation parameter
+    nu = uinlet * (ny-1)/Re
+    if (channel_with_cylinder) nu = uinlet *(2.0d0*r_cyl)/Re;    !kinematic viscosity 
+    omega = 1.0d0/((3.0*nu)+(1.0d0/2.0d0))                       !relaxation parameter
 
     L_lat = ny-1
     if (channel_with_cylinder) L_lat = 2.0d0*r_cyl
@@ -171,12 +169,12 @@ program lbm_2d
 
     ! Second-order Hermite polynomial 
     do k = 0, q-1
-        Hxx(k) = e(k, 1)*e(k, 1) - cs2    !Hxx
-        Hyy(k) = e(k, 2)*e(k, 2) - cs2    !Hyy
-        Hxy(k) = e(k, 1)*e(k, 2)                    !Hxy
-        Hxxy(k) = (e(k, 1)*e(k, 1) - cs2)*e(k, 2)                                 !Hxxy
-        Hxyy(k) = (e(k, 2)*e(k, 2) - cs2)*e(k, 1)                                 !Hxxy
-        Hxxyy(k) = (e(k, 1)*e(k, 1) - cs2)*(e(k, 2)*e(k, 2) - cs2)      !Hxxy
+        Hxx(k) = e(k, 1)*e(k, 1) - cs2
+        Hyy(k) = e(k, 2)*e(k, 2) - cs2
+        Hxy(k) = e(k, 1)*e(k, 2)    
+        Hxxy(k) = (e(k, 1)*e(k, 1) - cs2)*e(k, 2)
+        Hxyy(k) = (e(k, 2)*e(k, 2) - cs2)*e(k, 1)
+        Hxxyy(k) = (e(k, 1)*e(k, 1) - cs2)*(e(k, 2)*e(k, 2) - cs2)
     end do
 
     !$ call omp_set_num_threads(num_threads)
@@ -226,336 +224,337 @@ program lbm_2d
     open(unit=310, file='rho_mean_inlet.dat', status='replace')
     close(310)
     
-    ! Start timer
-    
     ! Main loop
-call cpu_time(start_time)
+    call cpu_time(start_time)
 do iter = restart_step+1, max_iter
 
-    !Macroscopic variables:
-    !$omp parallel do private(i,j) shared( f, e, rho, p, ux, uy, mxx, myy, mxy)
-    do i = 1, nx
-        do j = 1, ny
-            rho(i, j) = sum(f(i, j, :))
-            inv_rho = 1.0d0 / rho(i, j)
-            p(i, j) = rho(i, j) * cs2
-            ux(i, j) = sum(f(i, j, :) * e(:, 1)) * inv_rho
-            uy(i, j) = sum(f(i, j, :) * e(:, 2)) * inv_rho
-            mxx(i, j) =  sum(f(i, j, :) * Hxx(:)) * inv_rho
-            myy(i, j) =  sum(f(i, j, :) * Hyy(:)) * inv_rho
-            mxy(i, j) =  sum(f(i, j, :) * Hxy(:)) * inv_rho
+        !Macroscopic variables:
+        !$omp parallel do private(i,j) shared( f, e, rho, p, ux, uy, mxx, myy, mxy)
+        do i = 1, nx
+            do j = 1, ny
+                rho(i, j) = sum(f(i, j, :))
+                inv_rho = 1.0d0 / rho(i, j)
+                p(i, j) = rho(i, j) * cs2
+                ux(i, j) = sum(f(i, j, :) * e(:, 1)) * inv_rho
+                uy(i, j) = sum(f(i, j, :) * e(:, 2)) * inv_rho
+                mxx(i, j) =  sum(f(i, j, :) * Hxx(:)) * inv_rho
+                myy(i, j) =  sum(f(i, j, :) * Hyy(:)) * inv_rho
+                mxy(i, j) =  sum(f(i, j, :) * Hxy(:)) * inv_rho
+            end do
         end do
-    end do
-    !$omp end parallel do
+        !$omp end parallel do
 
-    !Boundary conditions:  MACROSCOPIC (DIRICHLET)
+        !Boundary conditions:  MACROSCOPIC (DIRICHLET)
 
-    !Right wall: 
-    if(.not. x_periodic) then
-        rho(nx,1:ny) = rho(nx-1,1:ny)
-        ux(nx,1:ny) = ux(nx-1,1:ny)
-        uy(nx,1:ny) = uy(nx-1,1:ny)
-    end if
-
-    !Left wall: INLET
-    if(.not. x_periodic) then
-        ux(1,1:ny) = uinlet
-        uy(1,1:ny) = vinlet
-    end if
-
-    !Top wall: Wall
-    if(.not. y_periodic) then
-        ux(1:nx,ny) = 0.0d0
-        uy(1:nx,ny) = 0.0d0
-    end if
-
-    !Bottom wall: wall
-    if(.not. y_periodic) then
-        ux(1:nx,1) = 0.0d0
-        uy(1:nx,1) = 0.0d0
-    end if
-
-    !Regularized boundary condition: Moments calculations
-    !=============================================================================================================================
-
-    !-----------------------------------------------EDGES-----------------------------------------------------------------------
-    !CYLINDER wall (No-Slip):---------------------------------------------------------------------------------------------------
-
-    if(channel_with_cylinder .and. (.not. rotated_coordinate)) then
-        !velocity interpolation for curved boundary: 
-        call velocity_interpolation_boundary_nodes()
-
-        do l = 1,nbct
-            i = bou_i(l)
-            j = bou_j(l)
-
-            !Original coordinate system:
-            call numerical_boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
-
-        end do
-    end if
-
-    if(channel_with_cylinder .and. rotated_coordinate) then
-        !velocity interpolation for curved boundary: 
-        if(vel_interp) call velocity_interpolation_boundary_nodes()
-        if(mom_interp) call moments_interpolation_boundary_nodes()
-
-        do l = 1,nbct
-            i = bou_i(l)
-            j = bou_j(l)
-
-            !!Rotated coordinate system
-            uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
-            uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
-            if(strong_mass_bc) call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            if(eq_mass_bc) call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-            if(weak_mass_bc) call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
-        end do
-
-    end if
-
-    if(.not. x_periodic) then
-        do j = 1,ny
-            bc_type = "outlet_bc"
-            coord_i = nx
-            coord_j = j
-            if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
-            if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
-        end do
-    end if
-
-    if(.not. x_periodic) then
-        do j = 1,ny
-            bc_type = "inlet_bc"
-            coord_i = 1
-            coord_j = j
-            if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
-            if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
-        end do
-    end if
-
-    if(.not. y_periodic) then
-        do i = 1,nx
-            bc_type = "topwall_bc"
-            coord_i = i
-            coord_j = ny
-            if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
-            if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
-        end do
-    end if
-
-    if(.not. y_periodic) then
-        do i = 1,nx
-            bc_type = "bottomwall_bc"
-            coord_i = i
-            coord_j = 1
-            if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
-            if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
-        end do
-    end if
-
-    !Free-density: Mean inlet density
-    rho_mean_counter = real(iter - (restart_step+1))
-    rho_inf_mean = ((rho_mean_counter*rho_inf_mean) + rho(1,ny/2) )/(rho_mean_counter + 1.0d0)
-    
-    if(mod(iter, 100)==0)then
-        open(unit=310, file='rho_mean_inlet.dat', access='append')
-            write(310,*) iter, rho_inf_mean
-        close(310)
-    end if
-
-    !Writing output file
-    !============================================================================================================================
-    if(post_process) then   
-        !output binary files	
-        if(mod(iter,iplot)==0)then
-            write (filename, 100) 'grid',10000000+iter,'.vtk',char(0)
-            write (filename_bin, 100) 'grid',10000000+iter,'.bin',char(0)
-            100 format (a4,I8,a4,a1)
-            if(channel_with_cylinder .or. channel_with_square) then
-                do  i = 1, nx
-                    do  j = 1, ny
-                        if(issolid(i,j)==1) then
-                            ux(i,j) = 0.0d0
-                            uy(i,j) = 0.0d0
-                        end if
-                    end do
-                end do
-            end if
-            call write_function_plot3d(filename_bin)
+        !Right wall: 
+        if(.not. x_periodic) then
+            rho(nx,1:ny) = rho(nx-1,1:ny)
+            ux(nx,1:ny) = ux(nx-1,1:ny)
+            uy(nx,1:ny) = uy(nx-1,1:ny)
         end if
-    end if
 
-    ! !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
-    ! do i = 1, nx
-    !     do j = 1, ny
-    !         do k = 0, q-1
-    !             cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
-    !             freg(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
-    !                              4.50d0*mxx(i, j)*Hxx(k) + &
-    !                              4.50d0*myy(i, j)*Hyy(k) + &
-    !                              9.00d0*mxy(i, j)*Hxy(k) )
-    !         end do
-    !     end do
-    ! end do
-    ! !$omp end parallel do
+        !Left wall: INLET
+        if(.not. x_periodic) then
+            ux(1,1:ny) = uinlet
+            uy(1,1:ny) = vinlet
+        end if
 
-    !=============================================================================================================================
-    !----------------------------------------------------------------------------------------------------	
-    !Collision - Moments space
-    !----------------------------------------------------------------------------------------------------	
-    !$omp parallel do collapse(2) shared(mxx, myy, mxy, ux, uy, omega) private(i, j)
-    do i = 1, nx
-        do j = 1, ny 
-            mxx(i, j) =  (1.0d0 - omega)*mxx(i, j) + omega*ux(i, j)*ux(i, j)
-            myy(i, j) =  (1.0d0 - omega)*myy(i, j) + omega*uy(i, j)*uy(i, j)
-            mxy(i, j) =  (1.0d0 - omega)*mxy(i, j) + omega*ux(i, j)*uy(i, j)
-        end do
-    end do
-    !$omp end parallel do
-    !----------------------------------------------------------------------------------------------------	
-    !Incompressible condition for trace of moments tensor
-    !----------------------------------------------------------------------------------------------------	
-    if(incomp_bulk) then
-        !$omp parallel do collapse(2) shared(mxx, myy, mxy, ux, uy, omega, mxx_s, myy_s, mxy_s) private(i, j)
-        do i = 1, nx
-            do j = 1, ny 
-                mxx_s(i, j) =  mxx(i, j) - (0.50d0*(mxx(i, j) + myy(i, j) - ux(i, j)*ux(i, j) - uy(i, j)*uy(i, j)))
-                myy_s(i, j) =  myy(i, j) - (0.50d0*(mxx(i, j) + myy(i, j) - ux(i, j)*ux(i, j) - uy(i, j)*uy(i, j)))
-                mxy_s(i, j) =  mxy(i, j)
-            end do
-        end do
-        !$omp end parallel do
+        !Top wall: Wall
+        if(.not. y_periodic) then
+            ux(1:nx,ny) = 0.0d0
+            uy(1:nx,ny) = 0.0d0
+        end if
 
-        !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
-        do i = 1, nx
-            do j = 1, ny
-                do k = 0, q-1
-                    cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
-                    fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
-                                    4.50d0*mxx_s(i, j)*Hxx(k) + &
-                                    4.50d0*myy_s(i, j)*Hyy(k) + &
-                                    9.00d0*mxy_s(i, j)*Hxy(k) )
-                end do
-            end do
-        end do
-        !$omp end parallel do
-    else
-        !Kinetic Projection / Regularization (using modified moments)
-        !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
-        do i = 1, nx
-            do j = 1, ny
-                do k = 0, q-1
-                    cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
-                    fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
-                                    4.50d0*mxx(i, j)*Hxx(k) + &
-                                    4.50d0*myy(i, j)*Hyy(k) + &
-                                    9.00d0*mxy(i, j)*Hxy(k) )
-                end do
-            end do
-        end do
-        !$omp end parallel do
-    end if
-    !----------------------------------------------------------------------------------------------------	
-    !writing output files and statistics:
-    if(post_process) then
-        if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
-        if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
-        if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
+        !Bottom wall: wall
+        if(.not. y_periodic) then
+            ux(1:nx,1) = 0.0d0
+            uy(1:nx,1) = 0.0d0
+        end if
 
-        !Statistics
-        !=======================================================================================================
+        !Regularized boundary condition: Moments calculations
+        !=============================================================================================================================
 
-        if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
-            !writing proble values
-            write(101,*) iter, rho(i_probe1,j_probe1)/3.0d0, rho(i_probe2,j_probe2)/3.0d0, &
-                & rho(i_probe3,j_probe3)/3.0d0, rho(i_probe4,j_probe4)/3.0d0 
-            write(102,*) iter, ux(i_probe1,j_probe1)/3.0d0, ux(i_probe2,j_probe2)/3.0d0, &
-                & ux(i_probe3,j_probe3)/3.0d0, ux(i_probe4,j_probe4)/3.0d0 
-            write(103,*) iter, uy(i_probe1,j_probe1)/3.0d0, uy(i_probe2,j_probe2)/3.0d0, &
-                & uy(i_probe3,j_probe3)/3.0d0, uy(i_probe4,j_probe4)/3.0d0
+        !-----------------------------------------------EDGES-----------------------------------------------------------------------
+        !CYLINDER wall (No-Slip):---------------------------------------------------------------------------------------------------
 
-            !writing surface pressure signal
-            call write_statistics_out(iter)
+        if(channel_with_cylinder .and. (.not. rotated_coordinate)) then
 
-            !Force Calculation:
+            call velocity_interpolation_boundary_nodes()
+
             do l = 1,nbct
                 i = bou_i(l)
                 j = bou_j(l)
-                call evaluate_forces(bou_i(l),bou_j(l),label_bc(l), F_drag(l), F_lift(l))
+
+                !Original coordinate system:
+                call numerical_boundary_cases(bou_i(l),bou_j(l),label_bc(l),ux(i,j),uy(i,j))
+
             end do
+        end if
 
-            F_drag_net = sum(F_drag(:))
-            F_lift_net = sum(F_lift(:))
+        if(channel_with_cylinder .and. rotated_coordinate) then
 
-            !writing force values over the time
-            open(unit=unit_f, file='data_mean/forces_time.dat', status='unknown', position='append', action='write')
-                write(unit_f,*) iter, F_drag_net, F_lift_net
-            close(unit_f)
+            if(vel_interp) call velocity_interpolation_boundary_nodes()
+            if(mom_interp) call moments_interpolation_boundary_nodes()
+
+            do l = 1,nbct
+                i = bou_i(l)
+                j = bou_j(l)
+
+                !!Rotated coordinate system
+                uxp_b(l) = ux(i,j)*cth_glb(i,j) + uy(i,j)*sth_glb(i,j)
+                uyp_b(l) = uy(i,j)*cth_glb(i,j) - ux(i,j)*sth_glb(i,j)
+                if(strong_mass_bc) call numerical_boundary_cases_rotation(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+                if(eq_mass_bc) call numerical_boundary_cases_rotation_rhoeq(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+                if(weak_mass_bc) call numerical_boundary_cases_rotation_weak(bou_i(l),bou_j(l),label_bc(l),uxp_b(l),uyp_b(l))
+            end do
 
         end if
 
-        if(iter == statsend) close(101)
-        if(iter == statsend) close(102)
-        if(iter == statsend) close(103)
+        if(.not. x_periodic) then
+            do j = 1,ny
+                bc_type = "outlet_bc"
+                coord_i = nx
+                coord_j = j
+                if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
+                if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
+            end do
+        end if
 
-    end if      !write output condition
-    !=============================================================================================================
+        if(.not. x_periodic) then
+            do j = 1,ny
+                bc_type = "inlet_bc"
+                coord_i = 1
+                coord_j = j
+                if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
+                if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
+            end do
+        end if
 
-    !----------------------------------------------------------------------------------------------------	
-    ! Streaming step
-    !----------------------------------------------------------------------------------------------------	
-    f_tmp = fout
-    do i = 1, nx
-        do j = 1, ny
-            do k = 0, q-1
-                if (i + e(k, 1) > 0 .and. i + e(k, 1) <= nx .and. j + e(k, 2) > 0 .and. j + e(k, 2) <= ny) then
-                    f(i + e(k, 1), j + e(k, 2), k) = f_tmp(i, j, k)
+        if(.not. y_periodic) then
+            do i = 1,nx
+                bc_type = "topwall_bc"
+                coord_i = i
+                coord_j = ny
+                if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
+                if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
+            end do
+        end if
+
+        if(.not. y_periodic) then
+            do i = 1,nx
+                bc_type = "bottomwall_bc"
+                coord_i = i
+                coord_j = 1
+                if (incomp_bc) call apply_bc_incomp(coord_i,coord_j,bc_type)
+                if (.not. incomp_bc) call apply_bc(coord_i,coord_j,bc_type)
+            end do
+        end if
+
+        !Writing output file
+        !============================================================================================================================
+        if(post_process) then   
+            !Free-density: Mean inlet density
+            if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
+                rho_mean_counter = real(iter - statsbegin)
+                rho_infty = sum(rho(1,:))/ny
+                rho_inf_mean = ((rho_mean_counter*rho_inf_mean) + rho_infty)/(rho_mean_counter + 1.0d0)
+
+                if(mod(iter, 100)==0)then
+                    open(unit=310, file='rho_mean_inlet.dat', access='append')
+                        write(310,*) iter, rho_inf_mean
+                    close(310)
                 end if
-            end do
-        end do
-    end do
+            end if
 
-    if(x_periodic) then
-        do j = 1, ny
-            do k = 0, q-1
-                if (1 - e(k, 1) < 1 ) f(1, j, k) = f_tmp(nx, j, k)
-                if (nx - e(k, 1) > nx) f(nx, j, k) = f_tmp(1, j, k)
-            end do
-        end do
-    end if
 
-    if(y_periodic) then
+            !output binary files	
+            if(mod(iter,iplot)==0)then
+                write (filename, 100) 'grid',10000000+iter,'.vtk',char(0)
+                write (filename_bin, 100) 'grid',10000000+iter,'.bin',char(0)
+                100 format (a4,I8,a4,a1)
+                if(channel_with_cylinder .or. channel_with_square) then
+                    do  i = 1, nx
+                        do  j = 1, ny
+                            if(issolid(i,j)==1) then
+                                ux(i,j) = 0.0d0
+                                uy(i,j) = 0.0d0
+                            end if
+                        end do
+                    end do
+                end if
+                call write_function_plot3d(filename_bin)
+            end if
+        end if
+
+        ! !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
+        ! do i = 1, nx
+        !     do j = 1, ny
+        !         do k = 0, q-1
+        !             cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
+        !             freg(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
+        !                              4.50d0*mxx(i, j)*Hxx(k) + &
+        !                              4.50d0*myy(i, j)*Hyy(k) + &
+        !                              9.00d0*mxy(i, j)*Hxy(k) )
+        !         end do
+        !     end do
+        ! end do
+        ! !$omp end parallel do
+
+        !=============================================================================================================================
+        !----------------------------------------------------------------------------------------------------	
+        !Collision - Moments space
+        !----------------------------------------------------------------------------------------------------	
+        !$omp parallel do collapse(2) shared(mxx, myy, mxy, ux, uy, omega) private(i, j)
         do i = 1, nx
-            do k = 0, q-1
-                if (1 - e(k, 2) < 1 ) f(i, 1, k) = f_tmp(i, ny, k)
-                if (ny - e(k, 2) > ny) f(i, ny, k) = f_tmp(i, 1, k)
+            do j = 1, ny 
+                mxx(i, j) =  (1.0d0 - omega)*mxx(i, j) + omega*ux(i, j)*ux(i, j)
+                myy(i, j) =  (1.0d0 - omega)*myy(i, j) + omega*uy(i, j)*uy(i, j)
+                mxy(i, j) =  (1.0d0 - omega)*mxy(i, j) + omega*ux(i, j)*uy(i, j)
             end do
         end do
-    end if
+        !$omp end parallel do
+        !----------------------------------------------------------------------------------------------------	
+        !Incompressible condition for trace of moments tensor
+        !----------------------------------------------------------------------------------------------------	
+        if(incomp_bulk) then
+            !$omp parallel do collapse(2) shared(mxx, myy, mxy, ux, uy, omega, mxx_s, myy_s, mxy_s) private(i, j)
+            do i = 1, nx
+                do j = 1, ny 
+                    mxx_s(i, j) =  mxx(i, j) - (0.50d0*(mxx(i, j) + myy(i, j) - ux(i, j)*ux(i, j) - uy(i, j)*uy(i, j)))
+                    myy_s(i, j) =  myy(i, j) - (0.50d0*(mxx(i, j) + myy(i, j) - ux(i, j)*ux(i, j) - uy(i, j)*uy(i, j)))
+                    mxy_s(i, j) =  mxy(i, j)
+                end do
+            end do
+            !$omp end parallel do
 
-    ! call calculate_norm(ul2norm)
+            !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
+            do i = 1, nx
+                do j = 1, ny
+                    do k = 0, q-1
+                        cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
+                        fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
+                                        4.50d0*mxx_s(i, j)*Hxx(k) + &
+                                        4.50d0*myy_s(i, j)*Hyy(k) + &
+                                        9.00d0*mxy_s(i, j)*Hxy(k) )
+                    end do
+                end do
+            end do
+            !$omp end parallel do
+        else
+            !Kinetic Projection / Regularization (using modified moments)
+            !$omp parallel do collapse(2) private(i, j, k, cu) shared(e, ux, uy, rho, w, mxx, myy, mxy, Hxx, Hyy, Hxy, fout)
+            do i = 1, nx
+                do j = 1, ny
+                    do k = 0, q-1
+                        cu = e(k, 1) * ux(i, j) + e(k, 2) * uy(i, j)
+                        fout(i, j, k) = w(k)*rho(i, j)*( 1.0d0 + (3.0d0*cu) +  &
+                                        4.50d0*mxx(i, j)*Hxx(k) + &
+                                        4.50d0*myy(i, j)*Hyy(k) + &
+                                        9.00d0*mxy(i, j)*Hxy(k) )
+                    end do
+                end do
+            end do
+            !$omp end parallel do
+        end if
+        !----------------------------------------------------------------------------------------------------	
+        !writing output files and statistics:
+        if(post_process) then
+            if(iter == statsbegin) open(unit=101,file="data_probe/p_probe.dat")
+            if(iter == statsbegin) open(unit=102,file="data_probe/ux_probe.dat")
+            if(iter == statsbegin) open(unit=103,file="data_probe/uy_probe.dat")
 
-    if (mod(iter, 100) == 0) then
-        call cpu_time(end_time)
-        wall_time = end_time - start_time
-        mlups = (real(nx*ny) * 100.0) / (1.0e6 * wall_time)
-        start_time = end_time
+            !Statistics
+            !=======================================================================================================
 
-        ! write(*, *) "STEP: ",iter ,"     ", "VEL_NORM: ",  ul2norm 
-        write(*, *) "STEP: ",iter ,"     ", "MAX_ux: ",  maxval(ux),"     ", "MLUPS: ",  mlups
-    end if
+            if((iter .ge. statsbegin) .and. (iter .le. statsend)) then
+                !writing proble values
+                write(101,*) iter, rho(i_probe1,j_probe1)/3.0d0, rho(i_probe2,j_probe2)/3.0d0, &
+                    & rho(i_probe3,j_probe3)/3.0d0, rho(i_probe4,j_probe4)/3.0d0 
+                write(102,*) iter, ux(i_probe1,j_probe1)/3.0d0, ux(i_probe2,j_probe2)/3.0d0, &
+                    & ux(i_probe3,j_probe3)/3.0d0, ux(i_probe4,j_probe4)/3.0d0 
+                write(103,*) iter, uy(i_probe1,j_probe1)/3.0d0, uy(i_probe2,j_probe2)/3.0d0, &
+                    & uy(i_probe3,j_probe3)/3.0d0, uy(i_probe4,j_probe4)/3.0d0
+
+                !writing surface pressure signal
+                call write_statistics_out(iter)
+
+                !Force Calculation:
+                do l = 1,nbct
+                    i = bou_i(l)
+                    j = bou_j(l)
+                    call evaluate_forces(bou_i(l),bou_j(l),label_bc(l), F_drag(l), F_lift(l))
+                end do
+
+                F_drag_net = sum(F_drag(:))
+                F_lift_net = sum(F_lift(:))
+
+                !writing force values over the time
+                open(unit=unit_f, file='data_mean/forces_time.dat', status='unknown', position='append', action='write')
+                    write(unit_f,*) iter, F_drag_net, F_lift_net
+                close(unit_f)
+
+            end if
+
+            if(iter == statsend) close(101)
+            if(iter == statsend) close(102)
+            if(iter == statsend) close(103)
+
+        end if      !write output condition
+        !=============================================================================================================
+
+        !----------------------------------------------------------------------------------------------------	
+        ! Streaming step
+        !----------------------------------------------------------------------------------------------------	
+        f_tmp = fout
+        do i = 1, nx
+            do j = 1, ny
+                do k = 0, q-1
+                    if (i + e(k, 1) > 0 .and. i + e(k, 1) <= nx .and. j + e(k, 2) > 0 .and. j + e(k, 2) <= ny) then
+                        f(i + e(k, 1), j + e(k, 2), k) = f_tmp(i, j, k)
+                    end if
+                end do
+            end do
+        end do
+
+        if(x_periodic) then
+            do j = 1, ny
+                do k = 0, q-1
+                    if (1 - e(k, 1) < 1 ) f(1, j, k) = f_tmp(nx, j, k)
+                    if (nx - e(k, 1) > nx) f(nx, j, k) = f_tmp(1, j, k)
+                end do
+            end do
+        end if
+
+        if(y_periodic) then
+            do i = 1, nx
+                do k = 0, q-1
+                    if (1 - e(k, 2) < 1 ) f(i, 1, k) = f_tmp(i, ny, k)
+                    if (ny - e(k, 2) > ny) f(i, ny, k) = f_tmp(i, 1, k)
+                end do
+            end do
+        end if
+
+        ! call calculate_norm(ul2norm)
+
+        if (mod(iter, 100) == 0) then
+            call cpu_time(end_time)
+            wall_time = end_time - start_time
+            mlups = (real(nx*ny) * 100.0) / (1.0e6 * wall_time)
+            start_time = end_time
+
+            ! write(*, *) "STEP: ",iter ,"     ", "VEL_NORM: ",  ul2norm 
+            write(*, *) "STEP: ",iter ,"     ", "MAX_ux: ",  sngl(maxval(ux)),"     ", "MLUPS: ",  sngl(mlups)
+        end if
 
 
-    if (mod(iter, isave) == 0) then 
-        call write_restart_file(iter)
-    end if
+        if (mod(iter, isave) == 0) then 
+            call write_restart_file(iter)
+        end if
 
 
-end do         !Main loop end
+end do   !Main loop end
 
 contains
-
     subroutine evaluate_forces(xi,yj,label, F_x, F_y)
         implicit none
         integer,intent(in) :: xi,yj,label
@@ -565,6 +564,9 @@ contains
 
         Is(0:q-1) = Incs_b(label,0:q-1)
         Os(0:q-1) = Outs_b(label,0:q-1)
+
+        ! Is(0:q-1) = Incs_f(label,0:q-1)
+        ! Os(0:q-1) = Outs_f(label,0:q-1)
 
         Fx_inc  = 0.0d0
         Fy_inc  = 0.0d0
@@ -1001,7 +1003,6 @@ contains
 
         nbct = sum(isbound(:,:))
         call allocate_cylinder_memory()
-
 
         cnt = 1
         do  i = 1, nx
@@ -2055,6 +2056,60 @@ contains
         Incs_b(14,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 1, 1, 0 /)
         Outs_b(14,0:q-1) = (/ 1, 1, 1, 1, 1, 1, 0, 1, 1 /)
 
+
+        !only fluid-solid connection, no solid-solid connection
+        Incs_f = 0.0d0
+        Outs_f = 0.0d0
+
+        !case-1              0  1  2  3  4  5  6  7  8
+        Incs_f(1,0:q-1) = (/ 0, 0, 0, 0, 0, 0, 0, 0, 1 /)
+        Outs_f(1,0:q-1) = (/ 0, 0, 0, 0, 0, 0, 1, 0, 0 /)
+
+        !case-2              0  1  2  3  4  5  6  7  8
+        Incs_f(2,0:q-1) = (/ 0, 0, 0, 0, 0, 0, 0, 1, 0 /)
+        Outs_f(2,0:q-1) = (/ 0, 0, 0, 0, 0, 1, 0, 0, 0 /)
+
+        !case-3              0  1  2  3  4  5  6  7  8
+        Incs_f(3,0:q-1) = (/ 0, 0, 0, 0, 1, 0, 0, 1, 1 /)
+        Outs_f(3,0:q-1) = (/ 0, 0, 1, 0, 0, 1, 1, 0, 0 /)
+
+        !case-4              0  1  2  3  4  5  6  7  8
+        Incs_f(4,0:q-1) = (/ 0, 0, 0, 0, 0, 1, 0, 0, 0 /)
+        Outs_f(4,0:q-1) = (/ 0, 0, 0, 0, 0, 0, 0, 1, 0 /)
+
+        !case-5              0  1  2  3  4  5  6  7  8
+        Incs_f(5,0:q-1) = (/ 0, 1, 0, 0, 0, 1, 0, 0, 1 /)
+        Outs_f(5,0:q-1) = (/ 0, 0, 0, 1, 0, 0, 1, 1, 0 /)
+
+        !case-7              0  1  2  3  4  5  6  7  8
+        Incs_f(7,0:q-1) = (/ 0, 1, 0, 0, 1, 1, 0, 1, 1 /)
+        Outs_f(7,0:q-1) = (/ 0, 0, 1, 1, 0, 1, 1, 1, 0 /)
+
+        !case-8              0  1  2  3  4  5  6  7  8
+        Incs_f(8,0:q-1) = (/ 0, 0, 0, 0, 0, 0, 1, 0, 0 /)
+        Outs_f(8,0:q-1) = (/ 0, 0, 0, 0, 0, 0, 0, 0, 1 /)
+
+        !case-10              0  1  2  3  4  5  6  7  8
+        Incs_f(10,0:q-1) = (/ 0, 0, 0, 1, 0, 0, 1, 1, 0 /)
+        Outs_f(10,0:q-1) = (/ 0, 1, 0, 0, 0, 1, 0, 0, 1 /)
+
+        !case-11              0  1  2  3  4  5  6  7  8
+        Incs_f(11,0:q-1) = (/ 0, 0, 0, 1, 1, 0, 1, 1, 1 /)
+        Outs_f(11,0:q-1) = (/ 0, 1, 1, 0, 0, 1, 1, 0, 1 /)
+
+        !case-12              0  1  2  3  4  5  6  7  8
+        Incs_f(12,0:q-1) = (/ 0, 0, 1, 0, 0, 1, 1, 0, 0 /)
+        Outs_f(12,0:q-1) = (/ 0, 0, 0, 0, 1, 0, 0, 1, 1 /)
+
+        !case-13              0  1  2  3  4  5  6  7  8
+        Incs_f(13,0:q-1) = (/ 0, 1, 1, 0, 0, 1, 1, 0, 1 /)
+        Outs_f(13,0:q-1) = (/ 0, 0, 0, 1, 1, 0, 1, 1, 1 /)
+
+        !case-14              0  1  2  3  4  5  6  7  8
+        Incs_f(14,0:q-1) = (/ 0, 0, 1, 1, 0, 1, 1, 1, 0 /)
+        Outs_f(14,0:q-1) = (/ 0, 1, 0, 0, 1, 1, 0, 1, 1 /)
+
+
     end subroutine finding_incoming_outgoing_pops
 
     subroutine create_output_dir_if_needed (dir_name, length)
@@ -2172,8 +2227,8 @@ contains
         namelist/DomainSize/nx,ny,lattice_type
         namelist/Cylinder/ncy,L_front,L_back,L_top,L_bot
         namelist/Numbers/Re
-        namelist/Parallel/num_threads,nprocsx,nprocsy
-        namelist/Controls/uo,rho_infty,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats, cycle_period
+        namelist/Parallel/num_threads
+        namelist/Controls/uo,rho_infty,iplot,max_iter,isave,irestart,statsbegin,statsend,iplotstats
         namelist/LogicalControls/post_process, x_periodic,y_periodic,channel_with_cylinder,channel_with_square, &
             & incomp_bc,incomp_bulk,vel_interp, mom_interp, rotated_coordinate, strong_mass_bc, eq_mass_bc, weak_mass_bc
 
@@ -2237,6 +2292,7 @@ contains
         allocate(er(1:nx, 1:ny),er1(1:nx, 1:ny))
         allocate(scalar(1:nx, 1:ny))
         allocate(Incs_b(0:15, 0:q-1),Outs_b(0:15, 0:q-1))
+        allocate(Incs_f(0:15, 0:q-1),Outs_f(0:15, 0:q-1))
         allocate(cth_glb(1:nx, 1:ny),sth_glb(1:nx, 1:ny))
         allocate(c2th_glb(1:nx, 1:ny),s2th_glb(1:nx, 1:ny))
         allocate(cx_p(1:nx, 1:ny, 0:q-1), cy_p(1:nx, 1:ny, 0:q-1))
